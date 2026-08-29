@@ -3,7 +3,8 @@
  * Ski Stunt 3D — live check.
  *
  *   node tools/live-check.mjs <url> [<url> ...] [--expect index.html]
- *                             [--timeout 600] [--markdown out.md]
+ *                             [--timeout 600] [--pages-grace 120]
+ *                             [--markdown out.md]
  *
  * More than one URL may be given; the first that serves the committed
  * build wins. GitHub Pages paths follow the repository name, and this
@@ -37,6 +38,9 @@ const argValue = (name, fallback) => {
 const URLS = argv.filter((a) => a.startsWith('http'));
 const EXPECT = argValue('--expect', 'index.html');
 const TIMEOUT = Number(argValue('--timeout', '600')) * 1000;
+/* How long an unbroken run of 404s is still allowed to mean "the first
+ * deploy is on its way" rather than "Pages is not publishing this repo". */
+const PAGES_GRACE = Number(argValue('--pages-grace', '120')) * 1000;
 const MARKDOWN = argValue('--markdown', null);
 const POLL_MS = 10000;
 
@@ -60,7 +64,9 @@ const waitForDeploy = async () => {
 
   const started = Date.now();
   const lastSeen = new Map();
+  let allMissingSince = null;
   while (Date.now() - started < TIMEOUT) {
+    let sawSomething = false;
     for (const candidate of URLS) {
       try {
         const res = await fetch(candidate + (candidate.includes('?') ? '&' : '?') + 'cachebust=' + Date.now(), {
@@ -76,11 +82,34 @@ const waitForDeploy = async () => {
             return true;
           }
           lastSeen.set(candidate, 'HTTP 200 but a different build (sha ' + digest(body) + ')');
+          sawSomething = true;
         } else {
           lastSeen.set(candidate, 'HTTP ' + res.status);
+          if (res.status !== 404) sawSomething = true;
         }
       } catch (err) {
         lastSeen.set(candidate, String(err && err.message ? err.message : err));
+        sawSomething = true;
+      }
+    }
+
+    /* A repo whose Pages site exists serves *something* — the previous
+     * build, at worst. Nothing but 404s, from every candidate, for minutes
+     * on end, is not a slow deploy; it is a site that was never published.
+     * Say so instead of sitting on it until the timeout. */
+    if (sawSomething) {
+      allMissingSince = null;
+    } else {
+      if (allMissingSince === null) allMissingSince = Date.now();
+      if (Date.now() - allMissingSince > PAGES_GRACE) {
+        errors.push(
+          'every candidate URL has returned 404 for ' + Math.round(PAGES_GRACE / 1000) + 's — ' +
+          'GitHub Pages is not publishing this repository. Check Settings -> Pages: ' +
+          'source should be "Deploy from a branch", branch = the default branch, folder = / (root). ' +
+          'If you have only just enabled it, the first publish can take a couple of minutes — re-run this job.'
+        );
+        notes.push('tried: ' + URLS.join(', '));
+        return false;
       }
     }
     await sleep(POLL_MS);

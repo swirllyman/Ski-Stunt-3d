@@ -35,11 +35,11 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name != github.repository
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
@@ -80,9 +80,9 @@ jobs:
       github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
@@ -106,7 +106,8 @@ jobs:
             URLS="https://${OWNER,,}.github.io/${REPO}/ https://${OWNER,,}.github.io/${REPO,,}/"
           fi
           echo "trying: $URLS"
-          node tools/live-check.mjs $URLS --expect index.html --timeout 600 --markdown "$RUNNER_TEMP/live.md"
+          node tools/live-check.mjs $URLS --expect index.html \
+            --timeout 600 --pages-grace 120 --markdown "$RUNNER_TEMP/live.md"
 
       - name: Publish the result where a phone can read it
         if: always()
