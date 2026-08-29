@@ -228,11 +228,13 @@ Runs after a deploy, against the real Pages URL. It polls until the bytes being 
 
 The difference is what it exercises. The pre-push boot check serves locally vendored copies of the pinned modules, because the Claude Code sandbox cannot reach the CDN. This resolves the real import map, over the real network, in a real browser, against what Pages actually published. It is the only check that can catch a CDN outage, a pin jsDelivr will not serve, or a deploy that published the wrong commit.
 
-It accepts several candidate URLs and uses whichever one resolves. GitHub Pages paths follow the repository name and this repo is mixed case, so that is a question better answered by trying than by guessing.
+It accepts several candidate URLs and uses whichever one resolves, which is useful when running it by hand — GitHub Pages paths follow the repository name and this repo is mixed case. In CI it is given exactly one URL, because CI asks GitHub rather than guessing (below).
 
 If every candidate returns 404 for two minutes straight it stops early and says Pages is not publishing the repository, rather than sitting on it for the full timeout. A site that exists serves *something* — the previous build at worst — so an unbroken run of 404s is a settings problem, not a slow deploy. This is not hypothetical: the first CI run spent ten minutes discovering exactly that.
 
-The `live` job in the workflow runs it on pushes to whatever the default branch happens to be — resolved at run time, not hardcoded — because that is the branch Pages serves.
+The `live` job asks the Pages API which branch is deployed and at what URL, and drives the check only when the pushed ref is that branch. It does not infer either. Both inferences it started with turned out to be wrong within a day: the URL casing was a coin flip, and "Pages serves the default branch" stopped being true the moment Pages was pointed at `main` while the default branch was still something else. A push to any other branch now says so and passes, because nothing new is deployed to check.
+
+Pages being disabled entirely is a hard failure, reported from the API rather than inferred from 404s.
 
 A red live check is a real failure and stays red. A deployed build that does not load is the exact thing this pipeline exists to keep off the phone.
 

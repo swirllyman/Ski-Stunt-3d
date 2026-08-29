@@ -74,11 +74,11 @@ jobs:
   live:
     name: Live check
     needs: smoke
-    # Only after something actually deploys: Pages serves the default branch.
-    if: >-
-      github.event_name == 'push' &&
-      github.ref_name == github.event.repository.default_branch
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@v5
 
@@ -86,31 +86,66 @@ jobs:
         with:
           node-version: '22'
 
+      # Ask GitHub which branch Pages serves and what URL it serves it at,
+      # rather than assuming it is the default branch at a guessed casing.
+      # Both assumptions have already been wrong once each.
+      - name: Ask GitHub what Pages is actually serving
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pages" || echo 000)"
+
+          if [ "$code" = "404" ]; then
+            echo "::error::GitHub Pages is not enabled for this repository. Settings -> Pages -> Source: Deploy from a branch."
+            exit 1
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::The Pages API returned HTTP $code; cannot tell what is deployed."
+            cat "$body"
+            exit 1
+          fi
+
+          url="$(jq -r '.html_url // empty' "$body")"
+          branch="$(jq -r '.source.branch // empty' "$body")"
+          path="$(jq -r '.source.path // "/"' "$body")"
+          status="$(jq -r '.status // "unknown"' "$body")"
+          echo "Pages serves $branch $path at $url (status: $status)"
+
+          {
+            echo "url=$url"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Not the deployed branch, nothing new to check
+        if: steps.pages.outputs.branch != github.ref_name
+        run: |
+          {
+            echo "### Live check skipped"
+            echo
+            echo "Pages serves \`${{ steps.pages.outputs.branch }}\`; this ran on \`${{ github.ref_name }}\`."
+            echo "Nothing new is deployed, so there is nothing to drive."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Locate a browser
+        if: steps.pages.outputs.branch == github.ref_name
         run: |
           BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           [ -n "$BIN" ] && echo "CHROME_BIN=$BIN" >> "$GITHUB_ENV" || echo "no browser found"
 
       - name: Wait for Pages, then drive the deployed build
-        env:
-          # Set the PAGES_URL repository variable to override, e.g. for a
-          # custom domain. Otherwise both casings of the project-page URL
-          # are tried and whichever resolves is used.
-          PAGES_URL: ${{ vars.PAGES_URL }}
+        if: steps.pages.outputs.branch == github.ref_name
         run: |
-          OWNER="${GITHUB_REPOSITORY%%/*}"
-          REPO="${GITHUB_REPOSITORY#*/}"
-          if [ -n "$PAGES_URL" ]; then
-            URLS="$PAGES_URL"
-          else
-            URLS="https://${OWNER,,}.github.io/${REPO}/ https://${OWNER,,}.github.io/${REPO,,}/"
-          fi
-          echo "trying: $URLS"
-          node tools/live-check.mjs $URLS --expect index.html \
+          node tools/live-check.mjs "${{ steps.pages.outputs.url }}" --expect index.html \
             --timeout 600 --pages-grace 120 --markdown "$RUNNER_TEMP/live.md"
 
       - name: Publish the result where a phone can read it
-        if: always()
+        if: always() && steps.pages.outputs.branch == github.ref_name
         run: |
           if [ -f "$RUNNER_TEMP/live.md" ]; then
             cat "$RUNNER_TEMP/live.md" >> "$GITHUB_STEP_SUMMARY"
