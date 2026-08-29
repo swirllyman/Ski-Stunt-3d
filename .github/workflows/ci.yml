@@ -1,0 +1,118 @@
+# The smoke test as a merge gate, and the deployed build as a second one.
+#
+# Section 8 of SKI_STUNT_3D_PIPELINE.md says the smoke test is mandatory
+# before every push, and it runs inside the Claude Code session where a red
+# result is cheapest to act on. This workflow is the braces to that belt:
+# it re-runs the same script on GitHub so the result shows up as a check
+# next to the merge button, which is the only place it is visible on a phone.
+#
+# The second job is the part the local run genuinely cannot do. It waits for
+# Pages to publish the commit, then opens the real URL in a real browser
+# against the real CDN. That is the closest a machine gets to answering
+# "will this load when I open it on the phone".
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    # Exactly one run per commit: `push` covers branches in this repo, and
+    # `pull_request` picks up forks, whose push events never reach us.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Locate a browser
+        run: |
+          BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -n "$BIN" ]; then
+            echo "CHROME_BIN=$BIN" >> "$GITHUB_ENV"
+            echo "using $BIN"
+          else
+            echo "no browser found; the boot check will report skip"
+          fi
+
+      - name: Smoke test
+        run: |
+          BASE=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            BASE="--base origin/${{ github.base_ref }}"
+          fi
+          node tools/smoke-test.mjs $BASE --markdown "$RUNNER_TEMP/smoke.md"
+
+      - name: Publish the result where a phone can read it
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/smoke.md" ]; then
+            cat "$RUNNER_TEMP/smoke.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '### Smoke test crashed before it could report' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  live:
+    name: Live check
+    needs: smoke
+    # Only after something actually deploys: Pages serves the default branch.
+    if: >-
+      github.event_name == 'push' &&
+      github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Locate a browser
+        run: |
+          BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          [ -n "$BIN" ] && echo "CHROME_BIN=$BIN" >> "$GITHUB_ENV" || echo "no browser found"
+
+      - name: Wait for Pages, then drive the deployed build
+        env:
+          # Set the PAGES_URL repository variable to override, e.g. for a
+          # custom domain. Otherwise both casings of the project-page URL
+          # are tried and whichever resolves is used.
+          PAGES_URL: ${{ vars.PAGES_URL }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          if [ -n "$PAGES_URL" ]; then
+            URLS="$PAGES_URL"
+          else
+            URLS="https://${OWNER,,}.github.io/${REPO}/ https://${OWNER,,}.github.io/${REPO,,}/"
+          fi
+          echo "trying: $URLS"
+          node tools/live-check.mjs $URLS --expect index.html --timeout 600 --markdown "$RUNNER_TEMP/live.md"
+
+      - name: Publish the result where a phone can read it
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/live.md" ]; then
+            cat "$RUNNER_TEMP/live.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '### Live check crashed before it could report' >> "$GITHUB_STEP_SUMMARY"
+          fi

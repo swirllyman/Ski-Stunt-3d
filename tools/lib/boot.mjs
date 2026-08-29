@@ -27,7 +27,13 @@ export const findChromium = () => {
       }
     }
   }
-  for (const candidate of ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome']) {
+  const candidates = [
+    '/usr/bin/chromium', '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
+    '/opt/google/chrome/chrome', '/snap/bin/chromium',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ];
+  for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
@@ -94,9 +100,9 @@ const connectCdp = async (wsUrl) => {
   return { send: send, on: (fn) => listeners.push(fn), close: () => socket.close() };
 };
 
-const launch = async (binary, port, profileDir) => {
+const launch = async (binary, port, profileDir, headlessFlag) => {
   const child = spawn(binary, [
-    '--headless=new',
+    headlessFlag || '--headless=new',
     '--no-sandbox',
     '--no-proxy-server',
     '--disable-dev-shm-usage',
@@ -127,6 +133,10 @@ const launch = async (binary, port, profileDir) => {
     if (child.exitCode !== null) break;
   }
   child.kill('SIGKILL');
+  /* Chrome has changed what --headless means more than once. If the new
+   * flag was rejected, try the plain one before giving up — a CI runner
+   * with a browser that will not start is worth one retry. */
+  if (!headlessFlag) return launch(binary, port, profileDir, '--headless');
   throw new Error('Chromium did not expose a DevTools endpoint. ' + stderr.split('\n').slice(-4).join(' '));
 };
 
@@ -137,13 +147,14 @@ const launch = async (binary, port, profileDir) => {
  * The callback receives { evaluate, sleep, errors, url }. Console errors
  * and uncaught exceptions accumulate in `errors` for the duration.
  */
-export const withPage = async (html, vendorRoot, options, fn) => {
+export const withPage = async (options, fn) => {
   const opts = options || {};
   const binary = findChromium();
   if (!binary) return { skipped: true, reason: 'no Chromium binary found', errors: [] };
 
   const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ski-boot-'));
-  const { server, port } = await serve(html, path.resolve(vendorRoot));
+  const local = opts.url ? null : await serve(opts.html, path.resolve(opts.vendorRoot));
+  const server = local ? local.server : null;
   const debugPort = 9000 + Math.floor(Math.random() * 4000);
   let browser = null;
   const errors = [];
@@ -179,7 +190,8 @@ export const withPage = async (html, vendorRoot, options, fn) => {
       return res.result ? res.result.value : undefined;
     };
 
-    const url = 'http://127.0.0.1:' + port + '/' + (opts.debug ? '?debug=1' : '');
+    const base = opts.url || ('http://127.0.0.1:' + local.port + '/');
+    const url = opts.debug ? base + (base.includes('?') ? '&' : '?') + 'debug=1' : base;
     await cdp.send('Page.navigate', { url: url }, session);
 
     const value = await fn({ evaluate: evaluate, sleep: sleep, errors: errors, url: url });
@@ -188,7 +200,7 @@ export const withPage = async (html, vendorRoot, options, fn) => {
     return { skipped: false, errors: errors.concat([String(err && err.message ? err.message : err)]), value: null };
   } finally {
     if (browser && browser.child) browser.child.kill('SIGKILL');
-    server.close();
+    if (server) server.close();
     /* Chromium can still be flushing its profile as it dies, so a plain
      * rmSync races it and throws ENOTEMPTY. The temp dir is disposable. */
     await sleep(150);
@@ -199,52 +211,67 @@ export const withPage = async (html, vendorRoot, options, fn) => {
 };
 
 /**
+ * The assertions that make a page "playable enough to be worth opening on
+ * a phone": it boots, it holds a WebGL context, it keeps producing frames,
+ * it logs nothing red, and the debug panel obeys ?debug=1.
+ *
+ * Shared verbatim between the pre-push boot check (against a locally served
+ * copy) and the post-deploy live check (against the real Pages URL), so the
+ * two can never quietly drift into testing different things.
+ */
+export const checkPlayablePage = async (page, opts, notes) => {
+  let probe = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await page.sleep(250);
+    const raw = await page.evaluate(
+      'JSON.stringify(window.__ski ? { booted: window.__ski.booted, frames: window.__ski.frames, gl: window.__ski.gl, error: window.__ski.error } : null)'
+    );
+    probe = raw ? JSON.parse(raw) : null;
+    if (probe && probe.booted) break;
+  }
+  if (!probe || !probe.booted) {
+    page.errors.push('window.__ski.booted never became true — the page did not start');
+    const shown = await page.evaluate("document.getElementById('boot-error') ? document.getElementById('boot-error').textContent.slice(0, 300) : ''");
+    if (shown) page.errors.push('in-page diagnosis: ' + shown.replace(/\s+/g, ' ').trim());
+    return;
+  }
+
+  notes.push('booted, WebGL context ' + (probe.gl ? 'acquired' : 'MISSING'));
+  if (!probe.gl) page.errors.push('renderer has no WebGL context');
+
+  const framesAtStart = probe.frames;
+  await page.sleep(2500);
+  const after = JSON.parse(await page.evaluate('JSON.stringify({ frames: window.__ski.frames, error: window.__ski.error })'));
+  notes.push('rendered ' + (after.frames - framesAtStart) + ' frames in 2.5s');
+  if (after.frames - framesAtStart < 20) page.errors.push('render loop stalled (' + (after.frames - framesAtStart) + ' frames in 2.5s)');
+  if (after.error) page.errors.push('page reported a fatal error: ' + String(after.error).split('\n')[0]);
+
+  if (await page.evaluate("document.getElementById('boot-error').style.display === 'block'")) {
+    page.errors.push('the in-page boot-error panel is visible');
+  }
+
+  const panelPresent = await page.evaluate("!!document.getElementById('debug')");
+  if (opts.debug && !panelPresent) page.errors.push('?debug=1 did not create the debug panel');
+  if (!opts.debug && panelPresent) page.errors.push('the debug panel rendered without ?debug=1');
+  notes.push(opts.debug ? 'debug panel present under ?debug=1' : 'debug panel absent without ?debug=1');
+
+  if (opts.debug) {
+    const sliders = await page.evaluate("document.querySelectorAll('#debug input[type=range]').length");
+    notes.push(sliders + ' sliders wired');
+    if (!sliders) page.errors.push('the debug panel rendered no sliders');
+  }
+};
+
+/**
  * @returns {Promise<{ok: boolean, notes: string[], errors: string[]}>}
  */
 export const bootCheck = async (html, vendorRoot, options) => {
   const opts = options || {};
   const notes = [];
-
-  const outcome = await withPage(html, vendorRoot, opts, async (page) => {
-    let probe = null;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      await page.sleep(250);
-      const raw = await page.evaluate('JSON.stringify(window.__ski ? { booted: window.__ski.booted, frames: window.__ski.frames, gl: window.__ski.gl, error: window.__ski.error } : null)');
-      probe = raw ? JSON.parse(raw) : null;
-      if (probe && probe.booted) break;
-    }
-    if (!probe || !probe.booted) {
-      page.errors.push('window.__ski.booted never became true — the page did not start');
-      return null;
-    }
-
-    notes.push('booted, WebGL context ' + (probe.gl ? 'acquired' : 'MISSING'));
-    if (!probe.gl) page.errors.push('renderer has no WebGL context');
-
-    const framesAtStart = probe.frames;
-    await page.sleep(2500);
-    const after = JSON.parse(await page.evaluate('JSON.stringify({ frames: window.__ski.frames, error: window.__ski.error })'));
-    notes.push('rendered ' + (after.frames - framesAtStart) + ' frames in 2.5s');
-    if (after.frames - framesAtStart < 20) page.errors.push('render loop stalled (' + (after.frames - framesAtStart) + ' frames in 2.5s)');
-    if (after.error) page.errors.push('page reported a fatal error: ' + String(after.error).split('\n')[0]);
-
-    if (await page.evaluate("document.getElementById('boot-error').style.display === 'block'")) {
-      page.errors.push('the in-page boot-error panel is visible');
-    }
-
-    const panelPresent = await page.evaluate("!!document.getElementById('debug')");
-    if (opts.debug && !panelPresent) page.errors.push('?debug=1 did not create the debug panel');
-    if (!opts.debug && panelPresent) page.errors.push('the debug panel rendered without ?debug=1');
-    notes.push(opts.debug ? 'debug panel present under ?debug=1' : 'debug panel absent without ?debug=1');
-
-    if (opts.debug) {
-      const sliders = await page.evaluate("document.querySelectorAll('#debug input[type=range]').length");
-      notes.push(sliders + ' sliders wired');
-      if (!sliders) page.errors.push('the debug panel rendered no sliders');
-    }
-    return true;
-  });
-
+  const outcome = await withPage(
+    { html: html, vendorRoot: vendorRoot, debug: opts.debug },
+    (page) => checkPlayablePage(page, opts, notes)
+  );
   if (outcome.skipped) return { skipped: true, reason: outcome.reason, notes: [], errors: [] };
   return { skipped: false, ok: outcome.errors.length === 0, notes: notes, errors: outcome.errors };
 };

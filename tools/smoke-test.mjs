@@ -36,6 +36,7 @@ const argValue = (name, fallback) => {
 };
 const FILE = argValue('--file', 'index.html');
 const BASE = argValue('--base', null);
+const MARKDOWN = argValue('--markdown', null);
 const SKIP_BOOT = argv.includes('--no-boot');
 const QUIET = argv.includes('--quiet');
 
@@ -349,10 +350,23 @@ const structuralCheck = () => {
 const EXPECTED = [/^index\.html$/, /^[A-Z0-9_]+\.md$/, /^README\.md$/, /^tools\//, /^\.github\//, /^\.gitignore$/];
 
 const diffCheck = () => {
+  /* Note the .replace and not .trim(): `git status --porcelain` puts the
+   * status in the first two columns, so an unstaged change starts with a
+   * space. Trimming the whole blob ate that space on the first line only,
+   * and every path it reported was missing its first character. */
   const git = (args) => {
-    try { return execSync('git ' + args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
+    try { return execSync('git ' + args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().replace(/\n+$/, ''); }
     catch (err) { return null; }
   };
+  const porcelainPaths = (text) =>
+    (text || '')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const rest = line.slice(3);
+        const renamed = rest.split(' -> ');
+        return renamed[renamed.length - 1];
+      });
   let base = BASE;
   if (!base) {
     for (const candidate of ['origin/main', 'origin/master', 'main', 'master']) {
@@ -362,12 +376,11 @@ const diffCheck = () => {
   let files = [];
   let how = '';
   if (base) {
-    const committed = git('diff --name-only ' + base + '...HEAD') || '';
-    const working = git('status --porcelain') || '';
-    files = committed.split('\n').concat(working.split('\n').map((l) => l.slice(3)));
+    const committed = (git('diff --name-only ' + base + '...HEAD') || '').split('\n');
+    files = committed.concat(porcelainPaths(git('status --porcelain')));
     how = 'vs ' + base + ' plus working tree';
   } else {
-    files = (git('status --porcelain') || '').split('\n').map((l) => l.slice(3));
+    files = porcelainPaths(git('status --porcelain'));
     how = 'no base branch yet — listing the working tree';
   }
   files = Array.from(new Set(files.map((f) => f.trim()).filter(Boolean)));
@@ -433,15 +446,30 @@ const report = () => {
 
   const failed = results.filter((r) => r.status === 'FAIL');
   say(failed.length ? failed.length + ' CHECK(S) FAILED — do not push' : 'all checks green');
-  say('');
-  say('--- paste into the PR description ---');
-  say('| # | Check | Result |');
-  say('|---|---|---|');
+  const table = ['| # | Check | Result |', '|---|---|---|'];
   for (const r of results) {
     const icon = r.status === 'PASS' ? 'pass' : r.status === 'FAIL' ? '**fail**' : r.status.toLowerCase();
-    say('| ' + r.id + ' | ' + r.name + ' | ' + icon + ' — ' + r.detail.replace(/\|/g, '/') + ' |');
+    table.push('| ' + r.id + ' | ' + r.name + ' | ' + icon + ' — ' + r.detail.replace(/\|/g, '/') + ' |');
   }
+
   say('');
+  say('--- paste into the PR description ---');
+  for (const line of table) say(line);
+  say('');
+
+  /* CI writes this straight into the job summary, which is the one build
+   * signal that is legible on the GitHub mobile app. */
+  if (MARKDOWN) {
+    const detail = results
+      .filter((r) => r.lines.length)
+      .map((r) => '**' + r.id + '. ' + r.name + '**\n' + r.lines.map((l) => '- ' + l).join('\n'))
+      .join('\n\n');
+    fs.writeFileSync(
+      MARKDOWN,
+      '### Smoke test — ' + (failed.length ? failed.length + ' check(s) failed' : 'all checks green') + '\n\n' +
+        table.join('\n') + '\n\n<details><summary>Detail</summary>\n\n' + detail + '\n\n</details>\n'
+    );
+  }
   return failed.length === 0;
 };
 

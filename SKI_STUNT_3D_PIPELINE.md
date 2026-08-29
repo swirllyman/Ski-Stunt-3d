@@ -208,7 +208,29 @@ No dependencies, no install step. Node 22+.
 6. **Diff sanity** — lists what the commit touches and flags anything outside `index.html`, the two docs, `tools/` and `.github/`.
 7. **Boot check** — vendors the pinned modules locally, serves the page, and opens it in headless Chromium over the DevTools protocol. Asserts the page boots, acquires a WebGL context, keeps rendering, reports no console errors, and that `?debug=1` builds the panel while a plain load does not. Skips cleanly, with a note, where no Chromium is available.
 
-The PR description states which checks ran and their result — the smoke test prints a markdown table for exactly that. That is the only build signal available on a phone, so it matters.
+The PR description states which checks ran and their result — the smoke test prints a markdown table for exactly that, and `--markdown <file>` writes it out for CI to pick up.
+
+### The same checks, on GitHub
+
+`.github/workflows/ci.yml` runs the identical script on every push and on pull requests from forks, and writes the table into the job summary. That summary is the one build signal that is legible in the GitHub mobile app: a green or red check next to the merge button, tappable for the detail.
+
+This is deliberately braces to the local run's belt, not a replacement for it. A red result in the Claude Code session costs nothing to fix; a red result on GitHub costs a round trip. But the session is not the only way a commit can reach the repo, and an unchecked push is exactly the thing that puts a white rectangle on the phone.
+
+Two conditions keep it to one run per commit: `push` covers branches in this repo, and `pull_request` only fires for forks, whose push events never reach the workflow.
+
+### The live check
+
+```
+node tools/live-check.mjs <url> [<url> ...] [--expect index.html] [--timeout 600]
+```
+
+Runs after a deploy, against the real Pages URL. It polls until the bytes being served are the bytes that were committed — which is also how it knows the deploy has finished — then opens the page in headless Chromium and asserts exactly what the boot check asserts, sharing the same code so the two cannot drift apart.
+
+The difference is what it exercises. The pre-push boot check serves locally vendored copies of the pinned modules, because the Claude Code sandbox cannot reach the CDN. This resolves the real import map, over the real network, in a real browser, against what Pages actually published. It is the only check that can catch a CDN outage, a pin jsDelivr will not serve, or a deploy that published the wrong commit.
+
+It accepts several candidate URLs and uses whichever one resolves. GitHub Pages paths follow the repository name and this repo is mixed case, so that is a question better answered by trying than by guessing.
+
+The `live` job in the workflow runs it on pushes to whatever the default branch happens to be — resolved at run time, not hardcoded — because that is the branch Pages serves.
 
 ### What this deliberately does not cover
 
@@ -243,7 +265,7 @@ Both live in the repo. Claude Code reads the pipeline doc for how to work and th
 
 1. ~~Direct to `main`, or branch per change?~~ **Resolved: branch and PR while the shape is still being found.** Move to direct pushes on `main` once the smoke test has proven itself over a few weeks.
 2. ~~Paste the spec, or commit it?~~ **Resolved: commit it.** Version history for the design, and Claude Code always reads current truth rather than whatever got pasted.
-3. ~~Is a GitHub Actions workflow ever needed?~~ **Resolved for now: no.** Branch-deploy covers the whole deploy path, and the smoke test runs in the Claude Code session before the push, which is where a red result is cheapest to act on. Revisit only if a push ever lands unchecked — running the same script in CI is four lines of YAML and needs no dependencies.
+3. ~~Is a GitHub Actions workflow ever needed?~~ **Resolved: yes, but not for deploying.** Pages still deploys straight from the branch with no workflow in the path, which is what keeps deploy latency at 30 seconds. Actions earns its place for two things the local run cannot do: putting the smoke-test result next to the merge button where a phone can see it, and driving the *deployed* page in a real browser against the real CDN once Pages has published it. See section 8.
 4. Voice session persistence — Android suspends the mic on screen lock, and no permission overrides that if the app lacks a foreground audio service. Battery set to Unrestricted and "stay awake while charging" help but don't fully solve it. Currently unresolved.
 5. Live play sessions put the game and the voice session on the same phone, competing for foreground. Needs testing: whether a voice session survives being backgrounded while Chrome is in front, and if not, whether split-screen is workable.
 6. Does the debug panel need value persistence across page refreshes, or is Copy config enough? Start without it; add only if refresh-loss becomes annoying in practice.
