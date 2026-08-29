@@ -1,0 +1,1767 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1b2a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230d1b2a'/%3E%3Cpath d='M4 24h24' stroke='%235ec8ff' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M11 20l5-11 5 11' fill='none' stroke='%23eaf2ff' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Ski Stunt 3D</title>
+<style>
+  :root {
+    --ink: #eaf2ff;
+    --panel: rgba(9, 18, 32, 0.86);
+    --edge: rgba(150, 190, 240, 0.28);
+    --accent: #5ec8ff;
+    --warn: #ff7a59;
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #0d1b2a; color: var(--ink);
+    font: 14px/1.35 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #stage { position: fixed; inset: 0; touch-action: none; display: block; width: 100%; height: 100%; }
+
+  #hud {
+    position: fixed; left: 10px; top: calc(10px + var(--safe-t));
+    padding: 8px 11px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--edge);
+    backdrop-filter: blur(6px); pointer-events: none;
+    font-variant-numeric: tabular-nums; min-width: 140px;
+  }
+  #hud .big { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  #hud .unit { font-size: 12px; opacity: 0.6; font-weight: 500; }
+  #hud .row { display: flex; justify-content: space-between; gap: 14px; opacity: 0.82; font-size: 12px; }
+  #hud .state { margin-top: 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); }
+  #hud .state.crashed { color: var(--warn); }
+
+  #toast {
+    position: fixed; left: 50%; top: calc(64px + var(--safe-t)); transform: translateX(-50%);
+    padding: 7px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--edge);
+    font-weight: 600; opacity: 0; transition: opacity 0.25s ease; pointer-events: none; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  #controls {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 0 8px calc(8px + var(--safe-b)); display: flex; gap: 8px; align-items: flex-end;
+  }
+  .pad {
+    flex: 1; height: 88px; border-radius: 16px;
+    background: rgba(9, 18, 32, 0.55); border: 1px solid var(--edge);
+    color: var(--ink); font-size: 12px; font-weight: 700; letter-spacing: 0.8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    touch-action: none; transition: background 0.08s ease, transform 0.08s ease;
+  }
+  .pad .glyph { font-size: 24px; line-height: 1; }
+  .pad.on { background: rgba(94, 200, 255, 0.28); transform: translateY(2px); }
+  .pad.wide { flex: 1.25; }
+  #btn-reset {
+    position: fixed; right: 10px; top: calc(10px + var(--safe-t));
+    padding: 9px 13px; border-radius: 12px; background: var(--panel);
+    border: 1px solid var(--edge); color: var(--ink); font-weight: 700; font-size: 12px; letter-spacing: 0.6px;
+  }
+
+  #debug {
+    position: fixed; right: 8px; top: calc(56px + var(--safe-t));
+    width: min(330px, calc(100vw - 16px)); max-height: calc(100vh - 190px - var(--safe-t));
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 14px;
+    backdrop-filter: blur(8px); overflow: hidden; z-index: 20;
+  }
+  #debug header {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--edge); font-weight: 700; letter-spacing: 0.6px; font-size: 12px;
+  }
+  #debug header .spacer { flex: 1; }
+  #debug .body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0 8px; }
+  #debug.collapsed .body, #debug.collapsed .actions { display: none; }
+  .dbg-section > .head {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 10px 12px; background: none; border: 0; border-top: 1px solid rgba(150,190,240,0.14);
+    color: var(--accent); font: inherit; font-weight: 700; font-size: 12px; letter-spacing: 0.7px; text-transform: uppercase;
+  }
+  .dbg-section > .head .caret { transition: transform 0.15s ease; opacity: 0.7; }
+  .dbg-section.closed > .head .caret { transform: rotate(-90deg); }
+  .dbg-section.closed > .rows { display: none; }
+  .dbg-row { padding: 6px 12px 10px; }
+  .dbg-row .label { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 2px; }
+  .dbg-row .label .name { opacity: 0.85; }
+  .dbg-row .label .val { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
+  .dbg-row.dirty .label .val { color: #ffd166; }
+  .dbg-row input[type=range] {
+    width: 100%; height: 34px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none;
+  }
+  .dbg-row input[type=range]::-webkit-slider-runnable-track { height: 5px; border-radius: 3px; background: rgba(150,190,240,0.3); }
+  .dbg-row input[type=range]::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(150,190,240,0.3); }
+  .dbg-row input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #04101d;
+  }
+  .dbg-row input[type=range]::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); border: 2px solid #04101d; }
+  #debug .actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--edge); }
+  #debug .actions button { flex: 1; }
+  button {
+    background: rgba(94, 200, 255, 0.16); color: var(--ink);
+    border: 1px solid var(--edge); border-radius: 10px; padding: 11px 10px;
+    font: inherit; font-weight: 700; font-size: 12px; letter-spacing: 0.5px;
+  }
+  button:active { background: rgba(94, 200, 255, 0.34); }
+  #boot-error {
+    position: fixed; inset: 0; display: none; padding: 24px; overflow: auto;
+    background: #17070c; color: #ffd7cf; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; z-index: 99;
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div id="hud">
+  <div><span class="big" id="hud-speed">0</span> <span class="unit">km/h</span></div>
+  <div class="row"><span>distance</span><span id="hud-distance">0 m</span></div>
+  <div class="row"><span>air</span><span id="hud-air">0.0 s</span></div>
+  <div class="row"><span>flips</span><span id="hud-flips">0</span></div>
+  <div class="row"><span>best</span><span id="hud-best">0 m</span></div>
+  <div class="state" id="hud-state">ready</div>
+</div>
+
+<button id="btn-reset">RESET</button>
+<div id="toast"></div>
+
+<div id="controls">
+  <div class="pad" id="pad-left" data-action="left"><span class="glyph">&#9664;</span>CARVE L / BACKFLIP</div>
+  <div class="pad wide" id="pad-tuck" data-action="tuck"><span class="glyph">&#9660;</span>TUCK &middot; RELEASE TO POP</div>
+  <div class="pad" id="pad-right" data-action="right"><span class="glyph">&#9654;</span>CARVE R / FRONTFLIP</div>
+</div>
+
+<pre id="boot-error"></pre>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
+
+/* ------------------------------------------------------------------ *
+ * CONFIG — the single source of truth for every tunable number.
+ *
+ * Contract (see SKI_STUNT_3D_PIPELINE.md section 6):
+ *   - nothing outside CONFIG is tunable
+ *   - nothing in CONFIG is hardcoded elsewhere
+ *   - the debug panel reads and writes this object directly
+ *
+ * The smoke test enforces both directions of that contract, so a value
+ * added here must be read somewhere as CONFIG.<section>.<key>.
+ * ------------------------------------------------------------------ */
+const CONFIG = {
+  physics: {
+    gravity: -24,
+    groundFriction: 0.25,
+    restitution: 0.02,
+    airDrag: 0.055,
+    angularDrag: 0.14,
+    solverIterations: 20,
+    fixedStep: 0.008333,
+    maxSubSteps: 8,
+    contactStiffness: 10000000,
+    contactRelaxation: 3,
+  },
+  ski: {
+    lateralGrip: 11,
+    gripLimit: 22,
+    glideDrag: 0.32,
+    edgeSteer: 3.5,
+    carveResponse: 6,
+    popImpulse: 5.5,
+    tuckDragScale: 0.45,
+    contactTolerance: 0.18,
+    ankleAlign: 60,
+    bankAngle: 0.4,
+  },
+  ragdoll: {
+    muscleStiffness: 900,
+    muscleDamping: 60,
+    jointLimit: 0.95,
+    twistLimit: 0.45,
+    limbMassScale: 1,
+    torsoMassScale: 1,
+    limpStiffness: 0.05,
+    leanTorque: 60,
+    airSpinTorque: 26,
+    maxAngularSpeed: 34,
+    balanceDamping: 12,
+  },
+  animation: {
+    blendDuration: 0.16,
+    landingBlend: 0.28,
+    airborneDelay: 0.09,
+    groundedDelay: 0.05,
+    crashImpact: 13,
+    crashHoldTime: 1.8,
+    uprightMin: 0.3,
+    fallenDelay: 0.7,
+    stallSpeed: 1,
+  },
+  camera: {
+    followDistance: 9.5,
+    followHeight: 3.4,
+    followLag: 0.14,
+    fov: 64,
+    lookAhead: 5,
+    speedPullback: 0.16,
+  },
+  terrain: {
+    slopeAngle: 0.3,
+    width: 44,
+    length: 620,
+    elementSize: 2,
+    bumpAmplitude: 0.55,
+    bumpScale: 0.045,
+    rampSpacing: 68,
+    rampHeight: 2.4,
+    rampLength: 9,
+    rampWidth: 16,
+    wallHeight: 7,
+    treeDensity: 0.45,
+    treeSpread: 26,
+    seed: 20260829,
+  },
+  world: {
+    fogDensity: 0.0085,
+    sunElevation: 0.85,
+    ambientLevel: 0.55,
+  },
+};
+
+/* Deep snapshot of the values as committed in this file. "Reset to
+ * committed" restores from here, so it must be taken before anything
+ * (panel, URL, gameplay) has a chance to touch CONFIG. */
+const COMMITTED = JSON.parse(JSON.stringify(CONFIG));
+
+/* ------------------------------------------------------------------ *
+ * PANEL_SPEC — what the debug panel exposes. Every `path` must resolve
+ * to a leaf in CONFIG; the smoke test checks this.
+ * `rebuild: true` means the change needs a fresh run to take effect.
+ * ------------------------------------------------------------------ */
+const PANEL_SPEC = [
+  {
+    title: 'Physics',
+    params: [
+      { path: 'physics.gravity', min: -60, max: -4, step: 0.5 },
+      { path: 'physics.groundFriction', min: 0, max: 2, step: 0.05 },
+      { path: 'physics.restitution', min: 0, max: 0.8, step: 0.01 },
+      { path: 'physics.airDrag', min: 0, max: 0.4, step: 0.005 },
+      { path: 'physics.angularDrag', min: 0, max: 0.9, step: 0.01 },
+      { path: 'physics.solverIterations', min: 4, max: 40, step: 1 },
+      { path: 'physics.fixedStep', min: 0.004, max: 0.02, step: 0.001 },
+      { path: 'physics.maxSubSteps', min: 1, max: 10, step: 1 },
+      { path: 'physics.contactStiffness', min: 1000000, max: 100000000, step: 1000000 },
+      { path: 'physics.contactRelaxation', min: 1, max: 10, step: 0.5 },
+    ],
+  },
+  {
+    title: 'Skis',
+    params: [
+      { path: 'ski.lateralGrip', min: 0, max: 40, step: 0.5 },
+      { path: 'ski.gripLimit', min: 2, max: 90, step: 1 },
+      { path: 'ski.glideDrag', min: 0, max: 3, step: 0.02 },
+      { path: 'ski.edgeSteer', min: 0, max: 30, step: 0.25 },
+      { path: 'ski.carveResponse', min: 0.5, max: 20, step: 0.5 },
+      { path: 'ski.popImpulse', min: 0, max: 20, step: 0.25 },
+      { path: 'ski.tuckDragScale', min: 0.05, max: 1, step: 0.05 },
+      { path: 'ski.contactTolerance', min: 0.02, max: 0.6, step: 0.01 },
+      { path: 'ski.ankleAlign', min: 0, max: 300, step: 2 },
+      { path: 'ski.bankAngle', min: 0, max: 1.2, step: 0.02 },
+    ],
+  },
+  {
+    title: 'Ragdoll rig',
+    params: [
+      { path: 'ragdoll.muscleStiffness', min: 0, max: 8000, step: 20 },
+      { path: 'ragdoll.muscleDamping', min: 0, max: 400, step: 1 },
+      { path: 'ragdoll.jointLimit', min: 0.1, max: 2, step: 0.05 },
+      { path: 'ragdoll.twistLimit', min: 0.05, max: 1.5, step: 0.05 },
+      { path: 'ragdoll.limbMassScale', min: 0.25, max: 3, step: 0.05, rebuild: true },
+      { path: 'ragdoll.torsoMassScale', min: 0.25, max: 3, step: 0.05, rebuild: true },
+      { path: 'ragdoll.limpStiffness', min: 0, max: 0.5, step: 0.01 },
+      { path: 'ragdoll.leanTorque', min: 0, max: 400, step: 2 },
+      { path: 'ragdoll.airSpinTorque', min: 0, max: 80, step: 0.5 },
+      { path: 'ragdoll.maxAngularSpeed', min: 4, max: 120, step: 1 },
+      { path: 'ragdoll.balanceDamping', min: 0, max: 120, step: 0.5 },
+    ],
+  },
+  {
+    title: 'Animation',
+    params: [
+      { path: 'animation.blendDuration', min: 0.02, max: 1, step: 0.01 },
+      { path: 'animation.landingBlend', min: 0.02, max: 1.2, step: 0.01 },
+      { path: 'animation.airborneDelay', min: 0, max: 0.6, step: 0.01 },
+      { path: 'animation.groundedDelay', min: 0, max: 0.6, step: 0.01 },
+      { path: 'animation.crashImpact', min: 4, max: 45, step: 0.5 },
+      { path: 'animation.crashHoldTime', min: 0.2, max: 6, step: 0.1 },
+      { path: 'animation.uprightMin', min: -0.5, max: 0.9, step: 0.05 },
+      { path: 'animation.fallenDelay', min: 0.1, max: 4, step: 0.05 },
+      { path: 'animation.stallSpeed', min: 0, max: 6, step: 0.1 },
+    ],
+  },
+  {
+    title: 'Camera',
+    params: [
+      { path: 'camera.followDistance', min: 3, max: 26, step: 0.25 },
+      { path: 'camera.followHeight', min: 0.5, max: 14, step: 0.1 },
+      { path: 'camera.followLag', min: 0.01, max: 0.9, step: 0.01 },
+      { path: 'camera.fov', min: 35, max: 110, step: 1 },
+      { path: 'camera.lookAhead', min: 0, max: 20, step: 0.5 },
+      { path: 'camera.speedPullback', min: 0, max: 0.8, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Terrain',
+    params: [
+      { path: 'terrain.slopeAngle', min: 0.05, max: 0.9, step: 0.01, rebuild: true },
+      { path: 'terrain.width', min: 12, max: 90, step: 2, rebuild: true },
+      { path: 'terrain.length', min: 120, max: 1400, step: 20, rebuild: true },
+      { path: 'terrain.elementSize', min: 1, max: 5, step: 0.5, rebuild: true },
+      { path: 'terrain.bumpAmplitude', min: 0, max: 3, step: 0.05, rebuild: true },
+      { path: 'terrain.bumpScale', min: 0.005, max: 0.2, step: 0.005, rebuild: true },
+      { path: 'terrain.rampSpacing', min: 20, max: 200, step: 2, rebuild: true },
+      { path: 'terrain.rampHeight', min: 0, max: 8, step: 0.1, rebuild: true },
+      { path: 'terrain.rampLength', min: 3, max: 40, step: 0.5, rebuild: true },
+      { path: 'terrain.rampWidth', min: 3, max: 40, step: 0.5, rebuild: true },
+      { path: 'terrain.wallHeight', min: 0, max: 20, step: 0.5, rebuild: true },
+      { path: 'terrain.treeDensity', min: 0, max: 2, step: 0.05, rebuild: true },
+      { path: 'terrain.treeSpread', min: 2, max: 70, step: 1, rebuild: true },
+      { path: 'terrain.seed', min: 1, max: 99999999, step: 1, rebuild: true },
+    ],
+  },
+  {
+    title: 'World',
+    params: [
+      { path: 'world.fogDensity', min: 0, max: 0.05, step: 0.0005 },
+      { path: 'world.sunElevation', min: 0.05, max: 1.55, step: 0.01 },
+      { path: 'world.ambientLevel', min: 0, max: 2, step: 0.05 },
+    ],
+  },
+];
+
+const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
+
+/* ------------------------------------------------------------------ *
+ * Small helpers
+ * ------------------------------------------------------------------ */
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const damp = (a, b, lag, dt) => lerp(a, b, 1 - Math.exp(-dt / Math.max(0.001, lag)));
+
+const makeRng = (seed) => {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const getPath = (obj, path) => {
+  const parts = path.split('.');
+  let node = obj;
+  for (let i = 0; i < parts.length; i++) node = node[parts[i]];
+  return node;
+};
+
+const setPath = (obj, path, value) => {
+  const parts = path.split('.');
+  let node = obj;
+  for (let i = 0; i < parts.length - 1; i++) node = node[parts[i]];
+  node[parts[parts.length - 1]] = value;
+};
+
+const el = (id) => document.getElementById(id);
+
+const showToast = (text) => {
+  const node = el('toast');
+  node.textContent = text;
+  node.classList.add('show');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => node.classList.remove('show'), 1400);
+};
+
+const fatal = (err) => {
+  probe.error = err && err.stack ? err.stack : String(err);
+  const box = el('boot-error');
+  box.style.display = 'block';
+  box.textContent = 'Ski Stunt 3D failed to start.\n\n' + (err && err.stack ? err.stack : String(err));
+};
+
+/* ------------------------------------------------------------------ *
+ * Engine state (module-level singletons, populated by boot)
+ * ------------------------------------------------------------------ */
+let renderer, scene, camera, world;
+let groundMaterial, bodyMaterial, skiMaterial;
+let terrain = null;
+let skier = null;
+let sun = null;
+let hemi = null;
+const clock = { last: 0, accumulator: 0 };
+const camState = { pos: new THREE.Vector3(), look: new THREE.Vector3(), ready: false };
+
+const input = { left: false, right: false, tuck: false, popQueued: false, tuckHeldFor: 0 };
+
+/* Liveness probe read by tools/smoke-test.mjs in headless Chromium.
+ * Cheap enough to ship, and it is also the first thing to check from a
+ * phone: open the console and look at window.__ski. */
+const probe = { booted: false, frames: 0, gl: false, debug: false, error: null, run: null, config: null };
+window.__ski = probe;
+
+const run = {
+  state: 'ready',
+  distance: 0,
+  best: 0,
+  airTime: 0,
+  lastAirTime: 0,
+  flips: 0,
+  spin: 0,
+  crashTimer: 0,
+  groundedFor: 0,
+  airborneFor: 0,
+  fallenFor: 0,
+  steer: 0,
+};
+
+/* ------------------------------------------------------------------ *
+ * Terrain — one analytic height function drives both the collision
+ * heightfield and the render mesh, so what you see is what you hit.
+ * ------------------------------------------------------------------ */
+const heightAt = (x, z) => {
+  const t = terrain;
+  const d = -z;
+  let h = z * Math.tan(CONFIG.terrain.slopeAngle);
+
+  const fade = clamp(d / 30, 0, 1);
+  h += CONFIG.terrain.bumpAmplitude * fade * (
+    Math.sin(x * CONFIG.terrain.bumpScale * 3.1 + t.phaseA) *
+      Math.cos(d * CONFIG.terrain.bumpScale * 2.3 + t.phaseB) +
+    0.45 * Math.sin((x * 0.7 + d) * CONFIG.terrain.bumpScale * 5.9 + t.phaseC)
+  );
+
+  for (let i = 0; i < t.ramps.length; i++) {
+    const r = t.ramps[i];
+    const u = (d - r.d0) / CONFIG.terrain.rampLength;
+    if (u < 0 || u > 1) continue;
+    /* Wide, and soft at the edges. A narrow kicker with a steep flank is
+     * a trap: at 50 km/h the outside ski catches the side of it and the
+     * rider is face down in the snow before the jump even starts. */
+    const across = 1 - Math.abs(x - r.cx) / CONFIG.terrain.rampWidth;
+    if (across <= 0) continue;
+    h += CONFIG.terrain.rampHeight * u * u * (across * across * (3 - 2 * across));
+  }
+
+  const half = CONFIG.terrain.width * 0.5;
+  const ax = Math.abs(x);
+  if (ax > half) {
+    const k = clamp((ax - half) / 10, 0, 1);
+    h += CONFIG.terrain.wallHeight * k * k;
+  }
+  return h;
+};
+
+/* Surface normal by central difference on heightAt. */
+const normalAt = (x, z, out) => {
+  const e = 0.4;
+  const hx = heightAt(x + e, z) - heightAt(x - e, z);
+  const hz = heightAt(x, z + e) - heightAt(x, z - e);
+  out.set(-hx / (2 * e), 1, -hz / (2 * e));
+  out.normalize();
+  return out;
+};
+
+const buildTerrain = () => {
+  const rand = makeRng(CONFIG.terrain.seed);
+  terrain = {
+    phaseA: rand() * Math.PI * 2,
+    phaseB: rand() * Math.PI * 2,
+    phaseC: rand() * Math.PI * 2,
+    ramps: [],
+    body: null,
+    mesh: null,
+    trees: null,
+  };
+
+  const half = CONFIG.terrain.width * 0.5;
+  for (let d = 45; d < CONFIG.terrain.length - 30; d += CONFIG.terrain.rampSpacing) {
+    terrain.ramps.push({ d0: d, cx: (rand() * 2 - 1) * Math.max(0, half - CONFIG.terrain.rampWidth * 0.6) });
+  }
+
+  const es = CONFIG.terrain.elementSize;
+  const nx = Math.max(2, Math.round(CONFIG.terrain.width / es) + 1);
+  const nz = Math.max(2, Math.round(CONFIG.terrain.length / es) + 1);
+  terrain.nx = nx;
+  terrain.nz = nz;
+
+  const matrix = [];
+  for (let i = 0; i < nx; i++) {
+    const col = new Array(nz);
+    for (let j = 0; j < nz; j++) col[j] = heightAt(i * es - half, -(j * es));
+    matrix.push(col);
+  }
+
+  const shape = new CANNON.Heightfield(matrix, { elementSize: es });
+  /* cannon only consults a shape-level ContactMaterial when BOTH shapes
+   * carry a material, so the snow has to be labelled on the shape and not
+   * just on the body — otherwise the ski silently falls back to the
+   * body-level pair and skis on 0.25 friction, which on a 17-degree slope
+   * means standing still. */
+  shape.material = groundMaterial;
+  const body = new CANNON.Body({ mass: 0, material: groundMaterial });
+  body.addShape(shape);
+  body.position.set(-half, 0, 0);
+  body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  world.addBody(body);
+  terrain.body = body;
+
+  /* Render mesh built from the same samples. */
+  const positions = new Float32Array(nx * nz * 3);
+  const colors = new Float32Array(nx * nz * 3);
+  const piste = new THREE.Color(0xf2f7ff);
+  const rock = new THREE.Color(0x6f7b8c);
+  const band = new THREE.Color(0xd8e6f7);
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const k = (i * nz + j) * 3;
+      const x = i * es - half;
+      const z = -(j * es);
+      positions[k] = x;
+      positions[k + 1] = matrix[i][j];
+      positions[k + 2] = z;
+      const offPiste = clamp((Math.abs(x) - half + 3) / 6, 0, 1);
+      const stripe = Math.floor(-z / 25) % 2 === 0 ? 0 : 1;
+      const c = piste.clone().lerp(band, stripe * 0.5).lerp(rock, offPiste);
+      colors[k] = c.r;
+      colors[k + 1] = c.g;
+      colors[k + 2] = c.b;
+    }
+  }
+  const indices = [];
+  for (let i = 0; i < nx - 1; i++) {
+    for (let j = 0; j < nz - 1; j++) {
+      const a = i * nz + j;
+      const b = a + 1;
+      const c = (i + 1) * nz + j;
+      const dIdx = c + 1;
+      indices.push(a, c, b, b, c, dIdx);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  terrain.mesh = mesh;
+
+  buildTrees(rand, half);
+};
+
+const buildTrees = (rand, half) => {
+  const spacing = CONFIG.terrain.treeDensity > 0 ? 1 / CONFIG.terrain.treeDensity : 0;
+  const spots = [];
+  if (spacing > 0) {
+    for (let d = 20; d < CONFIG.terrain.length; d += spacing) {
+      for (let side = -1; side <= 1; side += 2) {
+        const x = side * (half + 2 + rand() * CONFIG.terrain.treeSpread);
+        const z = -(d + rand() * spacing);
+        spots.push({ x: x, z: z, s: 0.7 + rand() * 0.9 });
+      }
+    }
+  }
+  if (spots.length === 0) {
+    terrain.trees = null;
+    return;
+  }
+  const geo = new THREE.ConeGeometry(1.1, 5, 6);
+  geo.translate(0, 2.5, 0);
+  const mat = new THREE.MeshLambertMaterial({ color: 0x1f4032 });
+  const trees = new THREE.InstancedMesh(geo, mat, spots.length);
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < spots.length; i++) {
+    dummy.position.set(spots[i].x, heightAt(spots[i].x, spots[i].z) - 0.3, spots[i].z);
+    dummy.scale.setScalar(spots[i].s);
+    dummy.rotation.y = i * 1.7;
+    dummy.updateMatrix();
+    trees.setMatrixAt(i, dummy.matrix);
+  }
+  trees.instanceMatrix.needsUpdate = true;
+  trees.frustumCulled = false;
+  scene.add(trees);
+  terrain.trees = trees;
+};
+
+/* ------------------------------------------------------------------ *
+ * Skier — an 11-body ragdoll. Skis are compound shapes on the shins,
+ * so each leg is one rigid boot+ski unit and the "ankle" is a torque
+ * that flattens the ski against the surface normal.
+ * ------------------------------------------------------------------ */
+const PARTS = [
+  { name: 'pelvis', kind: 'box', size: [0.16, 0.11, 0.13], mass: 10, group: 'core', color: 0xff8c42 },
+  { name: 'torso', kind: 'box', size: [0.19, 0.24, 0.14], mass: 16, group: 'core', color: 0xff6b35 },
+  { name: 'head', kind: 'sphere', size: [0.13], mass: 4, group: 'core', color: 0xffd9b3 },
+  { name: 'upperArmL', kind: 'box', size: [0.055, 0.15, 0.055], mass: 2.2, group: 'limb', color: 0xffb703 },
+  { name: 'upperArmR', kind: 'box', size: [0.055, 0.15, 0.055], mass: 2.2, group: 'limb', color: 0xffb703 },
+  { name: 'lowerArmL', kind: 'box', size: [0.05, 0.145, 0.05], mass: 1.8, group: 'limb', color: 0xffb703 },
+  { name: 'lowerArmR', kind: 'box', size: [0.05, 0.145, 0.05], mass: 1.8, group: 'limb', color: 0xffb703 },
+  { name: 'thighL', kind: 'box', size: [0.085, 0.21, 0.085], mass: 6.5, group: 'limb', color: 0x2a9d8f },
+  { name: 'thighR', kind: 'box', size: [0.085, 0.21, 0.085], mass: 6.5, group: 'limb', color: 0x2a9d8f },
+  { name: 'shinL', kind: 'ski', size: [0.07, 0.22, 0.07], mass: 4.5, group: 'limb', color: 0x1d7874 },
+  { name: 'shinR', kind: 'ski', size: [0.07, 0.22, 0.07], mass: 4.5, group: 'limb', color: 0x1d7874 },
+];
+
+const SKI_OFFSET = [0, -0.3, 0.1];
+const SKI_HALF = [0.06, 0.02, 0.85];
+
+const JOINTS = [
+  { name: 'spine', a: 'pelvis', b: 'torso', pa: [0, 0.11, 0], pb: [0, -0.24, 0], axis: [0, 1, 0], cone: 0.55 },
+  { name: 'neck', a: 'torso', b: 'head', pa: [0, 0.24, 0], pb: [0, -0.13, 0], axis: [0, 1, 0], cone: 0.5 },
+  { name: 'shoulderL', a: 'torso', b: 'upperArmL', pa: [-0.245, 0.18, 0], pb: [0, 0.15, 0], axis: [0, -1, 0], cone: 1.7 },
+  { name: 'shoulderR', a: 'torso', b: 'upperArmR', pa: [0.245, 0.18, 0], pb: [0, 0.15, 0], axis: [0, -1, 0], cone: 1.7 },
+  { name: 'elbowL', a: 'upperArmL', b: 'lowerArmL', pa: [0, -0.15, 0], pb: [0, 0.145, 0], axis: [0, -1, 0], cone: 1.6 },
+  { name: 'elbowR', a: 'upperArmR', b: 'lowerArmR', pa: [0, -0.15, 0], pb: [0, 0.145, 0], axis: [0, -1, 0], cone: 1.6 },
+  { name: 'hipL', a: 'pelvis', b: 'thighL', pa: [-0.11, -0.11, 0], pb: [0, 0.21, 0], axis: [0, -1, 0], cone: 1.3 },
+  { name: 'hipR', a: 'pelvis', b: 'thighR', pa: [0.11, -0.11, 0], pb: [0, 0.21, 0], axis: [0, -1, 0], cone: 1.3 },
+  { name: 'kneeL', a: 'thighL', b: 'shinL', pa: [0, -0.21, 0], pb: [0, 0.22, 0], axis: [0, -1, 0], cone: 1.5 },
+  { name: 'kneeR', a: 'thighR', b: 'shinR', pa: [0, -0.21, 0], pb: [0, 0.22, 0], axis: [0, -1, 0], cone: 1.5 },
+];
+
+/* Poses are Euler XYZ triples for the child's orientation in the parent's
+ * frame, written for the right-hand side and mirrored to the left. */
+const POSES = {
+  ready: { spine: [-0.20, 0, 0], neck: [-0.15, 0, 0], shoulder: [0.45, 0, 0.25], elbow: [0.75, 0, 0], hip: [0.42, 0, 0.06], knee: [-0.34, 0, 0] },
+  tuck: { spine: [-0.62, 0, 0], neck: [-0.08, 0, 0], shoulder: [1.10, 0, 0.15], elbow: [1.40, 0, 0], hip: [0.98, 0, 0.05], knee: [-0.72, 0, 0] },
+  air: { spine: [-0.06, 0, 0], neck: [0.05, 0, 0], shoulder: [0.20, 0, 0.85], elbow: [0.35, 0, 0], hip: [0.26, 0, 0.16], knee: [-0.28, 0, 0] },
+  grab: { spine: [-0.78, 0, 0], neck: [-0.10, 0, 0], shoulder: [1.45, 0, 0.20], elbow: [1.75, 0, 0], hip: [1.18, 0, 0.10], knee: [-0.85, 0, 0] },
+  land: { spine: [-0.38, 0, 0], neck: [-0.18, 0, 0], shoulder: [0.80, 0, 0.35], elbow: [1.05, 0, 0], hip: [0.78, 0, 0.08], knee: [-0.58, 0, 0] },
+  crash: { spine: [0.05, 0, 0], neck: [0.10, 0, 0], shoulder: [0.10, 0, 1.10], elbow: [0.20, 0, 0], hip: [0.10, 0, 0.30], knee: [-0.15, 0, 0] },
+};
+
+const poseQuat = (poseName, jointName, out) => {
+  const base = jointName.replace(/[LR]$/, '');
+  const e = POSES[poseName][base];
+  const mirror = jointName.endsWith('L') ? -1 : 1;
+  out.setFromEuler(e[0], e[1] * mirror, e[2] * mirror, 'XYZ');
+  return out;
+};
+
+/**
+ * Forward kinematics from the joint pivots: place the pelvis, then walk
+ * JOINTS (which is in parent-before-child order) putting each child where
+ * its pivot meets its parent's, rotated by the ready pose.
+ *
+ * Spawning in the pose the muscles are already asking for means the PD
+ * controller starts at zero error. Spawning axis-aligned instead means it
+ * starts at half a radian of error on ten joints at once, which is a
+ * bad enough kick to throw the rig off the mountain.
+ */
+const layoutSkier = (originX, originZ) => {
+  const layout = {};
+  layout.pelvis = { pos: new CANNON.Vec3(originX, 0, originZ), quat: new CANNON.Quaternion(0, 0, 0, 1) };
+
+  const pivot = new CANNON.Vec3();
+  for (let i = 0; i < JOINTS.length; i++) {
+    const j = JOINTS[i];
+    const parent = layout[j.a];
+    const quat = new CANNON.Quaternion();
+    parent.quat.mult(poseQuat('ready', j.name, new CANNON.Quaternion()), quat);
+
+    parent.quat.vmult(new CANNON.Vec3(j.pa[0], j.pa[1], j.pa[2]), pivot);
+    const worldPivot = parent.pos.vadd(pivot);
+    quat.vmult(new CANNON.Vec3(j.pb[0], j.pb[1], j.pb[2]), pivot);
+    layout[j.b] = { pos: worldPivot.vsub(pivot), quat: quat };
+  }
+
+  /* drop the whole rig so the lower ski just clears the snow */
+  let lowest = Infinity;
+  const legs = ['shinL', 'shinR'];
+  for (let i = 0; i < legs.length; i++) {
+    const leg = layout[legs[i]];
+    const offset = new CANNON.Vec3();
+    leg.quat.vmult(new CANNON.Vec3(SKI_OFFSET[0], SKI_OFFSET[1], SKI_OFFSET[2]), offset);
+    lowest = Math.min(lowest, leg.pos.y + offset.y - SKI_HALF[1] - 0.06);
+  }
+  const lift = heightAt(originX, originZ) - lowest + 0.06;
+  const names = Object.keys(layout);
+  for (let i = 0; i < names.length; i++) layout[names[i]].pos.y += lift;
+  return layout;
+};
+
+const buildSkier = () => {
+  if (skier) {
+    for (let i = 0; i < skier.constraints.length; i++) world.removeConstraint(skier.constraints[i]);
+    for (let i = 0; i < skier.order.length; i++) {
+      world.removeBody(skier.bodies[skier.order[i]]);
+      scene.remove(skier.meshes[skier.order[i]]);
+    }
+  }
+
+  const origin = { x: 0, z: -8 };
+  const layout = layoutSkier(origin.x, origin.z);
+  const bodies = {};
+  const meshes = {};
+  const order = [];
+  let totalMass = 0;
+
+  for (let i = 0; i < PARTS.length; i++) {
+    const p = PARTS[i];
+    const scale = p.group === 'core' ? CONFIG.ragdoll.torsoMassScale : CONFIG.ragdoll.limbMassScale;
+    const mass = p.mass * scale;
+    const body = new CANNON.Body({
+      mass: mass,
+      material: bodyMaterial,
+      linearDamping: CONFIG.physics.airDrag,
+      angularDamping: CONFIG.physics.angularDrag,
+    });
+    const group = new THREE.Group();
+
+    if (p.kind === 'sphere') {
+      body.addShape(new CANNON.Sphere(p.size[0]));
+      const m = new THREE.Mesh(new THREE.SphereGeometry(p.size[0], 14, 10), new THREE.MeshLambertMaterial({ color: p.color }));
+      m.castShadow = true;
+      group.add(m);
+    } else {
+      body.addShape(new CANNON.Box(new CANNON.Vec3(p.size[0], p.size[1], p.size[2])));
+      const m = new THREE.Mesh(new THREE.BoxGeometry(p.size[0] * 2, p.size[1] * 2, p.size[2] * 2), new THREE.MeshLambertMaterial({ color: p.color }));
+      m.castShadow = true;
+      group.add(m);
+    }
+
+    if (p.kind === 'ski') {
+      /* The ski gets its own material so the solver leaves it alone: a
+       * ski's grip is wildly anisotropic and cannon's isotropic Coulomb
+       * friction cannot express that. Worse, the force it does apply
+       * scales with the contact count, and a 1.7 m ski on a heightfield
+       * collects enough contacts to weld the skier to a 17-degree slope.
+       * Snow resistance under the skis is CONFIG.ski instead. */
+      const skiShape = new CANNON.Box(new CANNON.Vec3(SKI_HALF[0], SKI_HALF[1], SKI_HALF[2]));
+      skiShape.material = skiMaterial;
+      body.addShape(skiShape, new CANNON.Vec3(SKI_OFFSET[0], SKI_OFFSET[1], SKI_OFFSET[2]));
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(SKI_HALF[0] * 2, SKI_HALF[1] * 2, SKI_HALF[2] * 2),
+        new THREE.MeshLambertMaterial({ color: 0xef476f })
+      );
+      m.position.set(SKI_OFFSET[0], SKI_OFFSET[1], SKI_OFFSET[2]);
+      m.castShadow = true;
+      group.add(m);
+    }
+
+    const place = layout[p.name];
+    body.position.copy(place.pos);
+    body.quaternion.copy(place.quat);
+    body.allowSleep = false;
+    world.addBody(body);
+    scene.add(group);
+    bodies[p.name] = body;
+    meshes[p.name] = group;
+    order.push(p.name);
+    totalMass += mass;
+  }
+
+  const constraints = [];
+  for (let i = 0; i < JOINTS.length; i++) {
+    const j = JOINTS[i];
+    const c = new CANNON.ConeTwistConstraint(bodies[j.a], bodies[j.b], {
+      pivotA: new CANNON.Vec3(j.pa[0], j.pa[1], j.pa[2]),
+      pivotB: new CANNON.Vec3(j.pb[0], j.pb[1], j.pb[2]),
+      axisA: new CANNON.Vec3(j.axis[0], j.axis[1], j.axis[2]),
+      axisB: new CANNON.Vec3(j.axis[0], j.axis[1], j.axis[2]),
+      angle: j.cone * CONFIG.ragdoll.jointLimit,
+      twistAngle: CONFIG.ragdoll.twistLimit,
+    });
+    c.collideConnected = false;
+    world.addConstraint(c);
+    constraints.push(c);
+  }
+
+  const blend = {};
+  for (let i = 0; i < JOINTS.length; i++) {
+    blend[JOINTS[i].name] = poseQuat('ready', JOINTS[i].name, new CANNON.Quaternion());
+  }
+
+  skier = {
+    bodies: bodies,
+    meshes: meshes,
+    order: order,
+    constraints: constraints,
+    blend: blend,
+    totalMass: totalMass,
+    pose: 'ready',
+    startZ: origin.z,
+  };
+};
+
+/* ---- muscles: a PD controller per joint, in the parent's frame ----
+ *
+ * Every gain in CONFIG.ragdoll and CONFIG.ski is an angular acceleration
+ * (rad/s^2) or a rate (1/s), never a raw torque. applyAngularAccel turns
+ * one into the torque this particular body needs, through its own inertia
+ * tensor. That is what makes one number behave the same way on a 16 kg
+ * torso and on a 1.8 kg forearm — and what keeps the integrator stable,
+ * since stability then depends only on stiffness*dt^2 and damping*dt.
+ * ------------------------------------------------------------------ */
+const tmpQa = new CANNON.Quaternion();
+const tmpQb = new CANNON.Quaternion();
+const tmpQc = new CANNON.Quaternion();
+const tmpAxis = new CANNON.Vec3();
+const tmpVec = new CANNON.Vec3();
+const tmpVec2 = new CANNON.Vec3();
+const tmpVec3 = new CANNON.Vec3();
+const tmpAccel = new CANNON.Vec3();
+const tmpLocal = new CANNON.Vec3();
+const tmpTorque = new CANNON.Vec3();
+const tmpNormal = new THREE.Vector3();
+const tmpFwd = new THREE.Vector3();
+const tmpSide = new THREE.Vector3();
+const tmpUp = new THREE.Vector3();
+const tmpCross = new THREE.Vector3();
+const tmpVcm = new THREE.Vector3();
+
+/** Torque = I * alpha, with I taken in the body's own frame. */
+const applyAngularAccel = (body, ax, ay, az, out) => {
+  tmpAccel.set(ax, ay, az);
+  body.vectorToLocalFrame(tmpAccel, tmpLocal);
+  tmpLocal.x *= body.inertia.x;
+  tmpLocal.y *= body.inertia.y;
+  tmpLocal.z *= body.inertia.z;
+  body.vectorToWorldFrame(tmpLocal, out);
+  body.torque.vadd(out, body.torque);
+  return out;
+};
+
+/**
+ * Rider intent — balance, flips, steering — as an angular acceleration of
+ * the rig about its own centre of mass.
+ *
+ * Torque alone cannot do this. Righting a 55 kg skier is a ~400 N*m job,
+ * while the sum of the limbs' own inertias is under 1 kg*m^2: a shared
+ * angular acceleration buys about 60 N*m and the skier topples anyway.
+ * The missing part is the m*r^2 term, and that needs FORCE. So each body
+ * gets the linear acceleration it would have under a rigid rotation about
+ * the centre of mass, alpha x d, plus its own I*alpha of spin. Summed,
+ * that is exactly I_com * alpha with zero net force — the rig turns as
+ * one piece, the joints feel no stress, and nothing is pushed sideways.
+ */
+const applyRigAccel = (ax, ay, az, includeSkis) => {
+  let mass = 0;
+  let comX = 0;
+  let comY = 0;
+  let comZ = 0;
+  for (let i = 0; i < skier.order.length; i++) {
+    const name = skier.order[i];
+    if (!includeSkis && (name === 'shinL' || name === 'shinR')) continue;
+    const body = skier.bodies[name];
+    mass += body.mass;
+    comX += body.position.x * body.mass;
+    comY += body.position.y * body.mass;
+    comZ += body.position.z * body.mass;
+  }
+  if (mass <= 0) return;
+  comX /= mass;
+  comY /= mass;
+  comZ /= mass;
+
+  for (let i = 0; i < skier.order.length; i++) {
+    const name = skier.order[i];
+    if (!includeSkis && (name === 'shinL' || name === 'shinR')) continue;
+    const body = skier.bodies[name];
+    const dx = body.position.x - comX;
+    const dy = body.position.y - comY;
+    const dz = body.position.z - comZ;
+    tmpVec.set(
+      (ay * dz - az * dy) * body.mass,
+      (az * dx - ax * dz) * body.mass,
+      (ax * dy - ay * dx) * body.mass
+    );
+    body.force.vadd(tmpVec, body.force);
+    applyAngularAccel(body, ax, ay, az, tmpTorque);
+  }
+};
+
+/** Moment of inertia about a world-space unit axis. */
+const inertiaAbout = (body, x, y, z) => {
+  tmpAccel.set(x, y, z);
+  body.vectorToLocalFrame(tmpAccel, tmpLocal);
+  return body.inertia.x * tmpLocal.x * tmpLocal.x +
+         body.inertia.y * tmpLocal.y * tmpLocal.y +
+         body.inertia.z * tmpLocal.z * tmpLocal.z;
+};
+
+const driveMuscles = (dt, stiffnessScale) => {
+  const stiffness = CONFIG.ragdoll.muscleStiffness * stiffnessScale;
+  const damping = CONFIG.ragdoll.muscleDamping * stiffnessScale;
+  for (let i = 0; i < JOINTS.length; i++) {
+    const j = JOINTS[i];
+    const parent = skier.bodies[j.a];
+    const child = skier.bodies[j.b];
+    const target = skier.blend[j.name];
+
+    /* desired child orientation in world space = parent * target */
+    parent.quaternion.mult(target, tmpQa);
+    /* error = desired * current^-1, taken the short way round */
+    child.quaternion.conjugate(tmpQb);
+    tmpQa.mult(tmpQb, tmpQc);
+    if (tmpQc.w < 0) {
+      tmpQc.x = -tmpQc.x; tmpQc.y = -tmpQc.y; tmpQc.z = -tmpQc.z; tmpQc.w = -tmpQc.w;
+    }
+    tmpQc.normalize();
+    const angle = 2 * Math.acos(clamp(tmpQc.w, -1, 1));
+    const sin = Math.sqrt(Math.max(1e-9, 1 - tmpQc.w * tmpQc.w));
+    tmpAxis.set(tmpQc.x / sin, tmpQc.y / sin, tmpQc.z / sin);
+
+    child.angularVelocity.vsub(parent.angularVelocity, tmpVec);
+    const ax = tmpAxis.x * stiffness * angle - tmpVec.x * damping;
+    const ay = tmpAxis.y * stiffness * angle - tmpVec.y * damping;
+    const az = tmpAxis.z * stiffness * angle - tmpVec.z * damping;
+    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+    if (mag < 1e-6) continue;
+
+    /* Reduced inertia about the torque axis. The pair shares one torque,
+     * so what the gain controls is how fast the joint angle closes — not
+     * how fast whichever limb happens to be lighter gets thrown. */
+    const ux = ax / mag;
+    const uy = ay / mag;
+    const uz = az / mag;
+    const ic = inertiaAbout(child, ux, uy, uz);
+    const ip = inertiaAbout(parent, ux, uy, uz);
+    const reduced = (ic * ip) / (ic + ip + 1e-9);
+    tmpTorque.set(ux * mag * reduced, uy * mag * reduced, uz * mag * reduced);
+    child.torque.vadd(tmpTorque, child.torque);
+    /* equal and opposite, so the rig cannot torque itself through space */
+    parent.torque.vsub(tmpTorque, parent.torque);
+  }
+};
+
+const blendPose = (poseName, dt) => {
+  const duration = poseName === 'land' ? CONFIG.animation.landingBlend : CONFIG.animation.blendDuration;
+  const t = clamp(dt / Math.max(0.01, duration), 0, 1);
+  for (let i = 0; i < JOINTS.length; i++) {
+    const name = JOINTS[i].name;
+    poseQuat(poseName, name, tmpQa);
+    skier.blend[name].slerp(tmpQa, t, skier.blend[name]);
+    skier.blend[name].normalize();
+  }
+  skier.pose = poseName;
+};
+
+/* ---- ski contact, grip, steering, balance ---- */
+const skiContact = (body) => {
+  body.pointToWorldFrame(new CANNON.Vec3(SKI_OFFSET[0], SKI_OFFSET[1], SKI_OFFSET[2]), tmpVec3);
+  const ground = heightAt(tmpVec3.x, tmpVec3.z);
+  const gap = tmpVec3.y - SKI_HALF[1] - ground;
+  return { touching: gap < CONFIG.ski.contactTolerance, gap: gap, x: tmpVec3.x, z: tmpVec3.z };
+};
+
+/**
+ * Grip acts on the skier as a whole, not on the shins alone: sizing a
+ * whole-body impulse and dumping it into one 4.5 kg leg is exactly what
+ * detonates a ragdoll on first contact. Giving every body the same
+ * delta-v keeps the momentum change honest and the rig intact.
+ * Edging and flattening stay per-ski, because that is what they are.
+ */
+const applySkiForces = (dt, contacts) => {
+  const dragScale = input.tuck ? CONFIG.ski.tuckDragScale : 1;
+  tmpFwd.set(0, 0, 0);
+  const normAvg = tmpSide.set(0, 0, 0);
+
+  for (let i = 0; i < contacts.length; i++) {
+    const body = contacts[i].body;
+    normalAt(contacts[i].x, contacts[i].z, tmpNormal);
+    normAvg.add(tmpNormal);
+
+    body.vectorToWorldFrame(new CANNON.Vec3(0, 0, -1), tmpVec);
+    tmpFwd.x += tmpVec.x;
+    tmpFwd.y += tmpVec.y;
+    tmpFwd.z += tmpVec.z;
+
+    /* "ankle": flatten the ski against the surface it is riding */
+    body.vectorToWorldFrame(new CANNON.Vec3(0, 1, 0), tmpVec2);
+    tmpUp.set(tmpVec2.x, tmpVec2.y, tmpVec2.z);
+    tmpCross.crossVectors(tmpUp, tmpNormal);
+    const alignK = CONFIG.ski.ankleAlign;
+    const alignD = CONFIG.ragdoll.muscleDamping * 0.5;
+    applyAngularAccel(
+      body,
+      tmpCross.x * alignK - body.angularVelocity.x * alignD,
+      tmpCross.y * alignK - body.angularVelocity.y * alignD,
+      tmpCross.z * alignK - body.angularVelocity.z * alignD,
+      tmpTorque
+    );
+  }
+
+  if (normAvg.lengthSq() < 1e-6 || tmpFwd.lengthSq() < 1e-6) return;
+  normAvg.normalize();
+  tmpFwd.addScaledVector(normAvg, -tmpFwd.dot(normAvg));
+  if (tmpFwd.lengthSq() < 1e-6) return;
+  tmpFwd.normalize();
+  /* normAvg aliases tmpSide, so read the normal out before overwriting it */
+  const nx = normAvg.x;
+  const ny = normAvg.y;
+  const nz = normAvg.z;
+  tmpSide.set(ny * tmpFwd.z - nz * tmpFwd.y, nz * tmpFwd.x - nx * tmpFwd.z, nx * tmpFwd.y - ny * tmpFwd.x);
+  if (tmpSide.lengthSq() < 1e-6) return;
+  tmpSide.normalize();
+
+  tmpVcm.set(0, 0, 0);
+  for (let i = 0; i < skier.order.length; i++) {
+    const body = skier.bodies[skier.order[i]];
+    tmpVcm.x += body.velocity.x * body.mass;
+    tmpVcm.y += body.velocity.y * body.mass;
+    tmpVcm.z += body.velocity.z * body.mass;
+  }
+  tmpVcm.multiplyScalar(1 / skier.totalMass);
+  const speed = tmpVcm.length();
+
+  /* steering: yaw the skis about the surface normal, with authority that
+     comes up with speed — standing still, an edge does nothing */
+  for (let i = 0; i < contacts.length; i++) {
+    const body = contacts[i].body;
+    const steerK = run.steer * CONFIG.ski.edgeSteer * clamp(speed / 6, 0, 1.6) / contacts.length;
+    applyRigAccel(nx * steerK, ny * steerK, nz * steerK, true);
+  }
+
+  /* edge grip and glide, as one delta-v shared by the whole rig */
+  const grip = Math.min(1, CONFIG.ski.lateralGrip * dt);
+  const glide = Math.min(1, CONFIG.ski.glideDrag * dragScale * dt);
+  const vSide = tmpVcm.dot(tmpSide);
+  const vFwd = tmpVcm.dot(tmpFwd);
+
+  /* An edge can only hold so much before it lets go. Without this cap,
+   * turning across the fall line erased the whole of the skier's speed
+   * inside a tenth of a second and pitched the rider over the tips. */
+  const cap = CONFIG.ski.gripLimit * dt;
+  let dvSide = -vSide * grip;
+  if (dvSide > cap) dvSide = cap;
+  else if (dvSide < -cap) dvSide = -cap;
+
+  const dvx = tmpSide.x * dvSide - tmpFwd.x * vFwd * glide;
+  const dvy = tmpSide.y * dvSide - tmpFwd.y * vFwd * glide;
+  const dvz = tmpSide.z * dvSide - tmpFwd.z * vFwd * glide;
+
+  for (let i = 0; i < skier.order.length; i++) {
+    const body = skier.bodies[skier.order[i]];
+    tmpVec.set(dvx * body.mass, dvy * body.mass, dvz * body.mass);
+    body.applyImpulse(tmpVec);
+  }
+};
+
+/**
+ * The rider's own balance. Deliberately not reactionless-correct: a real
+ * skier balances against the snow, and modelling that properly needs a
+ * foot-to-ground torque budget this rig does not have. On the ground it
+ * holds the torso up and banks it into the carve; in the air the same two
+ * pads become flip authority.
+ */
+const applyBalance = (dt, grounded, normal) => {
+  const pelvis = skier.bodies.pelvis;
+
+  if (grounded) {
+    pelvis.vectorToWorldFrame(new CANNON.Vec3(0, 0, -1), tmpVec);
+    tmpFwd.set(tmpVec.x, tmpVec.y, tmpVec.z);
+    if (tmpFwd.lengthSq() < 1e-6) return;
+    tmpFwd.normalize();
+    /* Stand up the slope, banked into the turn the skier is ACTUALLY
+     * making: lean = atan(v * yawRate / g), the angle at which gravity and
+     * the centripetal reaction line up through the skis.
+     *
+     * Banking off the input instead looks the same and rides completely
+     * differently: the lean arrives the instant the pad is touched, while
+     * the turn takes half a second to build, so the rider spends that half
+     * second falling over. Every held carve ended in the snow at 5 metres.
+     */
+    const speed = pelvis.velocity.length();
+    const yawRate = pelvis.angularVelocity.x * normal.x +
+                    pelvis.angularVelocity.y * normal.y +
+                    pelvis.angularVelocity.z * normal.z;
+    const lean = clamp(
+      Math.atan2(speed * yawRate, -CONFIG.physics.gravity),
+      -CONFIG.ski.bankAngle,
+      CONFIG.ski.bankAngle
+    );
+    const desired = tmpUp.copy(normal).applyAxisAngle(tmpFwd, -lean).normalize();
+
+    pelvis.vectorToWorldFrame(new CANNON.Vec3(0, 1, 0), tmpVec2);
+    tmpCross.set(tmpVec2.x, tmpVec2.y, tmpVec2.z).cross(desired);
+    const k = CONFIG.ragdoll.leanTorque;
+    const d = CONFIG.ragdoll.balanceDamping;
+    applyRigAccel(
+      tmpCross.x * k - pelvis.angularVelocity.x * d,
+      tmpCross.y * k - pelvis.angularVelocity.y * d,
+      tmpCross.z * k - pelvis.angularVelocity.z * d,
+      false
+    );
+  } else if (Math.abs(run.steer) > 0.02) {
+    /* airborne: the same two pads become flip authority */
+    pelvis.vectorToWorldFrame(new CANNON.Vec3(1, 0, 0), tmpVec);
+    const k = CONFIG.ragdoll.airSpinTorque * run.steer;
+    applyRigAccel(tmpVec.x * k, tmpVec.y * k, tmpVec.z * k, true);
+  }
+};
+
+const popJump = (normal) => {
+  const strength = CONFIG.ski.popImpulse;
+  for (let i = 0; i < skier.order.length; i++) {
+    const body = skier.bodies[skier.order[i]];
+    tmpVec.set(normal.x * strength * body.mass, normal.y * strength * body.mass, normal.z * strength * body.mass);
+    body.applyImpulse(tmpVec);
+  }
+};
+
+const resetRun = (rebuildWorld) => {
+  if (rebuildWorld) {
+    world.removeBody(terrain.body);
+    scene.remove(terrain.mesh);
+    terrain.mesh.geometry.dispose();
+    if (terrain.trees) scene.remove(terrain.trees);
+    buildTerrain();
+  }
+  buildSkier();
+  run.state = 'ready';
+  run.distance = 0;
+  run.airTime = 0;
+  run.lastAirTime = 0;
+  run.flips = 0;
+  run.spin = 0;
+  run.crashTimer = 0;
+  run.groundedFor = 0;
+  run.airborneFor = 0;
+  run.fallenFor = 0;
+  run.steer = 0;
+  camState.ready = false;
+  input.popQueued = false;
+};
+
+/* ------------------------------------------------------------------ *
+ * Per-frame update
+ * ------------------------------------------------------------------ */
+const syncMeshes = () => {
+  for (let i = 0; i < skier.order.length; i++) {
+    const name = skier.order[i];
+    const b = skier.bodies[name];
+    const g = skier.meshes[name];
+    g.position.set(b.position.x, b.position.y, b.position.z);
+    g.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+  }
+};
+
+const stepGame = (dt) => {
+  if (input.tuck) input.tuckHeldFor += dt;
+  const leanInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+  run.steer = damp(run.steer, leanInput, 1 / Math.max(0.1, CONFIG.ski.carveResponse), dt);
+
+  const contacts = [];
+  const legs = ['shinL', 'shinR'];
+  for (let i = 0; i < legs.length; i++) {
+    const body = skier.bodies[legs[i]];
+    const c = skiContact(body);
+    if (c.touching) contacts.push({ body: body, x: c.x, z: c.z });
+  }
+  const grounded = contacts.length > 0;
+
+  const pelvis = skier.bodies.pelvis;
+  normalAt(pelvis.position.x, pelvis.position.z, tmpNormal);
+
+  if (grounded) {
+    run.groundedFor += dt;
+    if (run.airborneFor > 0.25) {
+      run.lastAirTime = run.airborneFor;
+      const impact = -pelvis.velocity.y;
+      if (impact > CONFIG.animation.crashImpact) crash();
+    }
+    run.airborneFor = 0;
+  } else {
+    run.airborneFor += dt;
+    run.groundedFor = 0;
+    if (run.airborneFor > CONFIG.animation.airborneDelay && run.state !== 'crashed') run.airTime += dt;
+  }
+
+  /* head or torso ploughing the snow is a crash */
+  if (run.state !== 'crashed') {
+    const head = skier.bodies.head.position;
+    const torsoPos = skier.bodies.torso.position;
+    if (head.y - heightAt(head.x, head.z) < 0.22 || torsoPos.y - heightAt(torsoPos.x, torsoPos.z) < 0.22) crash();
+  }
+
+  /* ...and so is lying on your side, or coming to a dead stop mid-piste.
+   * Deliberately not gated on ski contact: a skier face down in the snow
+   * usually has both skis in the air, and gating this on `grounded` left
+   * the run parked there for the rest of time. */
+  if (run.state !== 'crashed') {
+    pelvis.vectorToWorldFrame(new CANNON.Vec3(0, 1, 0), tmpVec);
+    const nearGround = pelvis.position.y - heightAt(pelvis.position.x, pelvis.position.z) < 1.6;
+    const toppled = nearGround && tmpVec.y < CONFIG.animation.uprightMin;
+    if (toppled || pelvis.velocity.length() < CONFIG.animation.stallSpeed) run.fallenFor += dt;
+    else run.fallenFor = 0;
+    if (run.fallenFor > CONFIG.animation.fallenDelay) crash();
+  } else {
+    run.fallenFor = 0;
+  }
+
+  /* airborne rotation bookkeeping */
+  if (!grounded && run.state !== 'crashed') {
+    pelvis.vectorToWorldFrame(new CANNON.Vec3(1, 0, 0), tmpVec);
+    run.spin += (pelvis.angularVelocity.x * tmpVec.x + pelvis.angularVelocity.y * tmpVec.y + pelvis.angularVelocity.z * tmpVec.z) * dt;
+    const flips = Math.floor(Math.abs(run.spin) / (Math.PI * 2));
+    if (flips > run.flips) {
+      run.flips = flips;
+      showToast(run.spin > 0 ? 'BACKFLIP x' + flips : 'FRONTFLIP x' + flips);
+    }
+  } else if (grounded) {
+    run.spin = 0;
+  }
+
+  /* pose selection */
+  let pose = 'ready';
+  if (run.state === 'crashed') {
+    pose = 'crash';
+  } else if (run.airborneFor > CONFIG.animation.airborneDelay) {
+    pose = input.tuck ? 'grab' : 'air';
+    run.state = 'air';
+  } else if (run.groundedFor > CONFIG.animation.groundedDelay) {
+    run.state = 'riding';
+    if (run.lastAirTime > 0.3 && run.groundedFor < CONFIG.animation.landingBlend * 2.5) pose = 'land';
+    else pose = input.tuck ? 'tuck' : 'ready';
+  } else {
+    pose = skier.pose;
+  }
+  blendPose(pose, dt);
+
+  const stiffnessScale = run.state === 'crashed' ? CONFIG.ragdoll.limpStiffness : 1;
+  driveMuscles(dt, stiffnessScale);
+
+  if (run.state !== 'crashed') {
+    if (grounded) applySkiForces(dt, contacts);
+    applyBalance(dt, grounded, tmpNormal);
+    if (input.popQueued && grounded) {
+      popJump(tmpNormal);
+      showToast('POP');
+    }
+  }
+  input.popQueued = false;
+
+  /* drag: tucking is the reward for holding the line */
+  const dragScale = input.tuck ? CONFIG.ski.tuckDragScale : 1;
+  const spinCap = CONFIG.ragdoll.maxAngularSpeed;
+  for (let i = 0; i < skier.order.length; i++) {
+    const body = skier.bodies[skier.order[i]];
+    body.linearDamping = CONFIG.physics.airDrag * dragScale;
+    body.angularDamping = CONFIG.physics.angularDrag;
+    const spin = body.angularVelocity.length();
+    if (spin > spinCap) body.angularVelocity.scale(spinCap / spin, body.angularVelocity);
+  }
+
+  run.distance = Math.max(run.distance, skier.startZ - pelvis.position.z);
+  if (run.distance > run.best) run.best = run.distance;
+
+  if (run.state === 'crashed') {
+    run.crashTimer += dt;
+    if (run.crashTimer > CONFIG.animation.crashHoldTime) resetRun(false);
+  }
+
+  /* fell off the end or off the side of the world */
+  if (pelvis.position.y < heightAt(pelvis.position.x, pelvis.position.z) - 6 || -pelvis.position.z > CONFIG.terrain.length - 6) {
+    resetRun(false);
+  }
+};
+
+const crash = () => {
+  if (run.state === 'crashed') return;
+  run.state = 'crashed';
+  run.crashTimer = 0;
+  showToast('CRASH');
+};
+
+const updateCamera = (dt) => {
+  const p = skier.bodies.pelvis.position;
+  const v = skier.bodies.pelvis.velocity;
+  const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+
+  const dir = new THREE.Vector3(v.x, 0, v.z);
+  if (dir.lengthSq() < 0.5) dir.set(0, 0, -1);
+  dir.normalize();
+
+  const back = CONFIG.camera.followDistance + speed * CONFIG.camera.speedPullback;
+  const desired = new THREE.Vector3(
+    p.x - dir.x * back,
+    p.y + CONFIG.camera.followHeight,
+    p.z - dir.z * back
+  );
+  const floor = heightAt(desired.x, desired.z) + 1.5;
+  if (desired.y < floor) desired.y = floor;
+
+  if (!camState.ready) {
+    camState.pos.copy(desired);
+    camState.look.set(p.x, p.y, p.z);
+    camState.ready = true;
+  } else {
+    camState.pos.x = damp(camState.pos.x, desired.x, CONFIG.camera.followLag, dt);
+    camState.pos.y = damp(camState.pos.y, desired.y, CONFIG.camera.followLag, dt);
+    camState.pos.z = damp(camState.pos.z, desired.z, CONFIG.camera.followLag, dt);
+    camState.look.x = damp(camState.look.x, p.x + dir.x * CONFIG.camera.lookAhead, CONFIG.camera.followLag, dt);
+    camState.look.y = damp(camState.look.y, p.y + 0.4, CONFIG.camera.followLag, dt);
+    camState.look.z = damp(camState.look.z, p.z + dir.z * CONFIG.camera.lookAhead, CONFIG.camera.followLag, dt);
+  }
+  camera.position.copy(camState.pos);
+  camera.lookAt(camState.look);
+};
+
+let hudTimer = 0;
+const updateHud = (dt) => {
+  hudTimer += dt;
+  if (hudTimer < 0.08) return;
+  hudTimer = 0;
+  const v = skier.bodies.pelvis.velocity;
+  const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) * 3.6;
+  el('hud-speed').textContent = Math.round(speed);
+  el('hud-distance').textContent = Math.round(run.distance) + ' m';
+  el('hud-air').textContent = run.airTime.toFixed(1) + ' s';
+  el('hud-flips').textContent = String(run.flips);
+  el('hud-best').textContent = Math.round(run.best) + ' m';
+  const state = el('hud-state');
+  state.textContent = run.state;
+  state.classList.toggle('crashed', run.state === 'crashed');
+};
+
+/* ------------------------------------------------------------------ *
+ * Input
+ * ------------------------------------------------------------------ */
+const setPad = (action, on) => {
+  if (action === 'left') input.left = on;
+  if (action === 'right') input.right = on;
+  if (action === 'tuck') {
+    if (input.tuck && !on && input.tuckHeldFor > 0.05) input.popQueued = true;
+    input.tuck = on;
+    input.tuckHeldFor = 0;
+  }
+};
+
+const wireInput = () => {
+  const pads = document.querySelectorAll('.pad');
+  for (let i = 0; i < pads.length; i++) {
+    const pad = pads[i];
+    const action = pad.dataset.action;
+    const down = (ev) => {
+      ev.preventDefault();
+      pad.classList.add('on');
+      setPad(action, true);
+    };
+    const up = (ev) => {
+      ev.preventDefault();
+      pad.classList.remove('on');
+      setPad(action, false);
+    };
+    pad.addEventListener('pointerdown', down);
+    pad.addEventListener('pointerup', up);
+    pad.addEventListener('pointercancel', up);
+    pad.addEventListener('pointerleave', up);
+  }
+
+  el('btn-reset').addEventListener('click', () => {
+    resetRun(false);
+    showToast('RESET');
+  });
+
+  const keyMap = {
+    ArrowLeft: 'left', KeyA: 'left',
+    ArrowRight: 'right', KeyD: 'right',
+    ArrowDown: 'tuck', KeyS: 'tuck', Space: 'tuck',
+  };
+  window.addEventListener('keydown', (ev) => {
+    if (ev.repeat) return;
+    if (ev.code === 'KeyR') { resetRun(false); return; }
+    const action = keyMap[ev.code];
+    if (!action) return;
+    ev.preventDefault();
+    setPad(action, true);
+  });
+  window.addEventListener('keyup', (ev) => {
+    const action = keyMap[ev.code];
+    if (!action) return;
+    ev.preventDefault();
+    setPad(action, false);
+  });
+};
+
+/* ------------------------------------------------------------------ *
+ * Debug panel — built only when ?debug=1 is present.
+ * Sliders write straight into CONFIG; nothing here caches a value.
+ * ------------------------------------------------------------------ */
+const decimalsFor = (step) => {
+  if (step >= 1) return 0;
+  const s = String(step);
+  const dot = s.indexOf('.');
+  return dot < 0 ? 0 : s.length - dot - 1;
+};
+
+const formatValue = (v, step) => v.toFixed(decimalsFor(step));
+
+const serializeConfig = () => {
+  const lines = ['const CONFIG = {'];
+  const sections = Object.keys(CONFIG);
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    lines.push('  ' + section + ': {');
+    const keys = Object.keys(CONFIG[section]);
+    for (let k = 0; k < keys.length; k++) {
+      const value = CONFIG[section][keys[k]];
+      lines.push('    ' + keys[k] + ': ' + (Number.isInteger(value) ? value : Number(value.toFixed(6))) + ',');
+    }
+    lines.push('  },');
+  }
+  lines.push('};');
+  return lines.join('\n');
+};
+
+const copyToClipboard = (text) => {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(
+      () => showToast('CONFIG copied'),
+      () => showToast('Copy blocked — see console')
+    );
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('CONFIG copied');
+  } catch (err) {
+    showToast('Copy blocked — see console');
+  }
+  document.body.removeChild(ta);
+};
+
+const createDebugPanel = () => {
+  const root = document.createElement('div');
+  root.id = 'debug';
+
+  const header = document.createElement('header');
+  const title = document.createElement('span');
+  title.textContent = 'DEBUG';
+  const spacer = document.createElement('span');
+  spacer.className = 'spacer';
+  const toggle = document.createElement('button');
+  toggle.textContent = 'HIDE';
+  toggle.addEventListener('click', () => {
+    root.classList.toggle('collapsed');
+    toggle.textContent = root.classList.contains('collapsed') ? 'SHOW' : 'HIDE';
+  });
+  header.appendChild(title);
+  header.appendChild(spacer);
+  header.appendChild(toggle);
+  root.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'body';
+  root.appendChild(body);
+
+  const rows = [];
+
+  for (let s = 0; s < PANEL_SPEC.length; s++) {
+    const spec = PANEL_SPEC[s];
+    const section = document.createElement('div');
+    section.className = s === 0 ? 'dbg-section' : 'dbg-section closed';
+
+    const head = document.createElement('button');
+    head.className = 'head';
+    const caret = document.createElement('span');
+    caret.className = 'caret';
+    caret.textContent = '▾';
+    const label = document.createElement('span');
+    label.textContent = spec.title;
+    head.appendChild(caret);
+    head.appendChild(label);
+    head.addEventListener('click', () => section.classList.toggle('closed'));
+    section.appendChild(head);
+
+    const rowsWrap = document.createElement('div');
+    rowsWrap.className = 'rows';
+
+    for (let p = 0; p < spec.params.length; p++) {
+      const param = spec.params[p];
+      const row = document.createElement('div');
+      row.className = 'dbg-row';
+
+      const labelRow = document.createElement('div');
+      labelRow.className = 'label';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = param.path.split('.')[1] + (param.rebuild ? ' ↻' : '');
+      const val = document.createElement('span');
+      val.className = 'val';
+      labelRow.appendChild(name);
+      labelRow.appendChild(val);
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = String(param.min);
+      slider.max = String(param.max);
+      slider.step = String(param.step);
+      slider.value = String(getPath(CONFIG, param.path));
+
+      const refresh = () => {
+        const current = getPath(CONFIG, param.path);
+        slider.value = String(current);
+        val.textContent = formatValue(current, param.step);
+        row.classList.toggle('dirty', current !== getPath(COMMITTED, param.path));
+      };
+
+      slider.addEventListener('input', () => {
+        setPath(CONFIG, param.path, Number(slider.value));
+        refresh();
+        applyConfig();
+        if (param.rebuild) scheduleRebuild();
+      });
+
+      refresh();
+      rows.push(refresh);
+      row.appendChild(labelRow);
+      row.appendChild(slider);
+      rowsWrap.appendChild(row);
+    }
+
+    section.appendChild(rowsWrap);
+    body.appendChild(section);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = 'COPY CONFIG';
+  copyBtn.addEventListener('click', () => copyToClipboard(serializeConfig()));
+
+  const resetBtn = document.createElement('button');
+  resetBtn.textContent = 'RESET TO COMMITTED';
+  resetBtn.addEventListener('click', () => {
+    const sections = Object.keys(COMMITTED);
+    for (let i = 0; i < sections.length; i++) {
+      const keys = Object.keys(COMMITTED[sections[i]]);
+      for (let k = 0; k < keys.length; k++) CONFIG[sections[i]][keys[k]] = COMMITTED[sections[i]][keys[k]];
+    }
+    for (let i = 0; i < rows.length; i++) rows[i]();
+    applyConfig();
+    resetRun(true);
+    showToast('Reset to committed');
+  });
+
+  actions.appendChild(copyBtn);
+  actions.appendChild(resetBtn);
+  root.appendChild(actions);
+  document.body.appendChild(root);
+};
+
+let rebuildTimer = 0;
+const scheduleRebuild = () => {
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => resetRun(true), 350);
+};
+
+/* ------------------------------------------------------------------ *
+ * Config application — everything CONFIG touches outside the step loop
+ * is re-pushed here, so a slider takes effect without a reload.
+ * ------------------------------------------------------------------ */
+let bodyContact = null;
+let skiSnowContact = null;
+const sunDir = new THREE.Vector3(-0.5, 0.8, 0.35);
+
+/* Keep the shadow frustum on the rider instead of on the whole piste. */
+const updateSun = () => {
+  const p = skier.bodies.pelvis.position;
+  sun.target.position.set(p.x, p.y, p.z);
+  sun.target.updateMatrixWorld();
+  sun.position.set(p.x + sunDir.x * 60, p.y + sunDir.y * 60, p.z + sunDir.z * 60);
+};
+
+const applyConfig = () => {
+  world.gravity.set(0, CONFIG.physics.gravity, 0);
+  world.solver.iterations = Math.round(CONFIG.physics.solverIterations);
+  bodyContact.friction = CONFIG.physics.groundFriction;
+  bodyContact.restitution = CONFIG.physics.restitution;
+  bodyContact.contactEquationStiffness = CONFIG.physics.contactStiffness;
+  bodyContact.contactEquationRelaxation = CONFIG.physics.contactRelaxation;
+  skiSnowContact.restitution = CONFIG.physics.restitution;
+  skiSnowContact.contactEquationStiffness = CONFIG.physics.contactStiffness;
+  skiSnowContact.contactEquationRelaxation = CONFIG.physics.contactRelaxation;
+  world.defaultContactMaterial.contactEquationStiffness = CONFIG.physics.contactStiffness;
+  world.defaultContactMaterial.contactEquationRelaxation = CONFIG.physics.contactRelaxation;
+
+  camera.fov = CONFIG.camera.fov;
+  camera.updateProjectionMatrix();
+
+  scene.fog.density = CONFIG.world.fogDensity;
+  hemi.intensity = CONFIG.world.ambientLevel;
+  sunDir.set(-0.55, Math.sin(CONFIG.world.sunElevation), 0.45 * Math.cos(CONFIG.world.sunElevation)).normalize();
+
+  if (skier) {
+    for (let i = 0; i < skier.constraints.length; i++) {
+      skier.constraints[i].angle = JOINTS[i].cone * CONFIG.ragdoll.jointLimit;
+      skier.constraints[i].twistAngle = CONFIG.ragdoll.twistLimit;
+    }
+  }
+};
+
+/* ------------------------------------------------------------------ *
+ * Main loop
+ * ------------------------------------------------------------------ */
+const frame = (now) => {
+  requestAnimationFrame(frame);
+  probe.frames++;
+  const seconds = now * 0.001;
+  let dt = clock.last === 0 ? 0.016 : seconds - clock.last;
+  clock.last = seconds;
+  dt = clamp(dt, 0, 0.1);
+
+  const step = CONFIG.physics.fixedStep;
+  const maxSteps = Math.round(CONFIG.physics.maxSubSteps);
+  clock.accumulator += dt;
+  let steps = 0;
+  while (clock.accumulator >= step && steps < maxSteps) {
+    stepGame(step);
+    world.step(step);
+    clock.accumulator -= step;
+    steps++;
+  }
+  if (clock.accumulator > step * maxSteps) clock.accumulator = 0;
+
+  syncMeshes();
+  updateSun();
+  updateCamera(dt);
+  updateHud(dt);
+  renderer.render(scene, camera);
+};
+
+const onResize = () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+};
+
+/* ------------------------------------------------------------------ *
+ * Entry point
+ * ------------------------------------------------------------------ */
+const boot = () => {
+  const canvas = el('stage');
+  renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setClearColor(0x9fc7ee);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9fc7ee);
+  scene.fog = new THREE.FogExp2(0xa8cdf0, CONFIG.world.fogDensity);
+
+  camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, 1, 0.1, 900);
+
+  hemi = new THREE.HemisphereLight(0xdfefff, 0x88a0b8, CONFIG.world.ambientLevel);
+  scene.add(hemi);
+  sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -14;
+  sun.shadow.camera.right = 14;
+  sun.shadow.camera.top = 14;
+  sun.shadow.camera.bottom = -14;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 140;
+  sun.shadow.bias = -0.0012;
+  scene.add(sun);
+  scene.add(sun.target);
+
+  world = new CANNON.World({ gravity: new CANNON.Vec3(0, CONFIG.physics.gravity, 0) });
+  world.broadphase = new CANNON.SAPBroadphase(world);
+  world.allowSleep = false;
+  world.defaultContactMaterial.contactEquationStiffness = CONFIG.physics.contactStiffness;
+  world.defaultContactMaterial.contactEquationRelaxation = CONFIG.physics.contactRelaxation;
+
+  groundMaterial = new CANNON.Material('ground');
+  bodyMaterial = new CANNON.Material('body');
+  skiMaterial = new CANNON.Material('ski');
+  bodyContact = new CANNON.ContactMaterial(groundMaterial, bodyMaterial, {
+    friction: CONFIG.physics.groundFriction,
+    restitution: CONFIG.physics.restitution,
+  });
+  skiSnowContact = new CANNON.ContactMaterial(groundMaterial, skiMaterial, {
+    friction: 0,
+    restitution: CONFIG.physics.restitution,
+  });
+  world.addContactMaterial(bodyContact);
+  world.addContactMaterial(skiSnowContact);
+
+  buildTerrain();
+  buildSkier();
+  applyConfig();
+  wireInput();
+  onResize();
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
+
+  if (DEBUG) createDebugPanel();
+
+  if (window.__skiBootWatchdog) clearTimeout(window.__skiBootWatchdog);
+  probe.booted = true;
+  probe.gl = Boolean(renderer.getContext());
+  probe.debug = DEBUG;
+  probe.run = run;
+  probe.config = CONFIG;
+  requestAnimationFrame(frame);
+};
+
+window.addEventListener('error', (ev) => fatal(ev.error || ev.message));
+window.addEventListener('unhandledrejection', (ev) => fatal(ev.reason));
+
+try {
+  boot();
+} catch (err) {
+  fatal(err);
+}
+</script>
+
+<script>
+/* Classic script, parsed before the deferred module runs: if the module
+ * never executes (import map miss, CDN down, offline) the page would
+ * otherwise be a silent white rectangle on a phone. */
+window.__skiBootWatchdog = setTimeout(function () {
+  var box = document.getElementById('boot-error');
+  box.style.display = 'block';
+  box.textContent =
+    'Ski Stunt 3D did not start within 8s.\n\n' +
+    'The module script never ran. Usual causes:\n' +
+    '  - no network, or the CDN in the import map is unreachable\n' +
+    '  - the pinned three / cannon-es version does not exist\n' +
+    '  - a syntax error in the module script\n\n' +
+    'Import map:\n' +
+    (document.querySelector('script[type=importmap]') || { textContent: '(missing)' }).textContent;
+}, 8000);
+</script>
+</body>
+</html>
