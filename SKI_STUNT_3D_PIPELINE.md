@@ -230,7 +230,11 @@ The difference is what it exercises. The pre-push boot check serves locally vend
 
 It accepts several candidate URLs and uses whichever one resolves. GitHub Pages paths follow the repository name and this repo is mixed case, so that is a question better answered by trying than by guessing.
 
+If every candidate returns 404 for two minutes straight it stops early and says Pages is not publishing the repository, rather than sitting on it for the full timeout. A site that exists serves *something* — the previous build at worst — so an unbroken run of 404s is a settings problem, not a slow deploy. This is not hypothetical: the first CI run spent ten minutes discovering exactly that.
+
 The `live` job in the workflow runs it on pushes to whatever the default branch happens to be — resolved at run time, not hardcoded — because that is the branch Pages serves.
+
+A red live check is a real failure and stays red. A deployed build that does not load is the exact thing this pipeline exists to keep off the phone.
 
 ### What this deliberately does not cover
 
