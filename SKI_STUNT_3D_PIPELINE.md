@@ -75,10 +75,10 @@ Claude Code likewise **cannot see the game**. It has no eyes, and it cannot tell
 
 Best done once on a desktop if one is available; otherwise doable via GitHub mobile web with some patience.
 
-1. Create repo `swirllyman/ski-stunt-3d`.
+1. Create repo `swirllyman/Ski-Stunt-3d`.
 2. Add a single `index.html` at repo root (the whole game lives here).
 3. Repo Settings → Pages → deploy from branch (`main`, root). No Actions workflow needed for a single static file.
-4. Confirm `https://swirllyman.github.io/ski-stunt-3d/` serves.
+4. Confirm `https://swirllyman.github.io/Ski-Stunt-3d/` serves. The repo is `Ski-Stunt-3d`, mixed case — the Pages path follows the repo name, so bookmark the one that actually resolves.
 5. Connect the repo to Claude Code so web sessions can clone it.
 6. Commit `SKI_STUNT_3D_PIPELINE.md` and `SKI_STUNT_3D_GAME_SPEC.md` at repo root.
 
@@ -126,7 +126,7 @@ Smoke-test check 4 enforces both directions of this: every path the panel names 
 Hidden by default. Shown when the URL carries `?debug=1`. This keeps the shareable build clean while making the panel one URL edit away.
 
 ```
-https://swirllyman.github.io/ski-stunt-3d/?debug=1
+https://swirllyman.github.io/Ski-Stunt-3d/?debug=1
 ```
 
 ### Layout

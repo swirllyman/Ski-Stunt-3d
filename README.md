@@ -2,8 +2,8 @@
 
 A ragdoll ski stunt game in one HTML file. No build step, no npm, no bundler.
 
-**Play:** https://swirllyman.github.io/ski-stunt-3d/
-**Tune:** https://swirllyman.github.io/ski-stunt-3d/?debug=1
+**Play:** https://swirllyman.github.io/Ski-Stunt-3d/
+**Tune:** https://swirllyman.github.io/Ski-Stunt-3d/?debug=1
 
 ## Layout
 
