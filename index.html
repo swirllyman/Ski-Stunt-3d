@@ -221,7 +221,7 @@ const CONFIG = {
    * how far apart these sit IS the pump. */
   crouch: { spine: -0.6, hip: 1.15, knee: -1.15, ankle: 0.5, shoulder: 1.2, neck: -0.1 },
   extend: { spine: 0.02, hip: 0.05, knee: -0.06, ankle: -0.12, shoulder: 0.15, neck: 0.06 },
-  camera: { distance: 0, height: 2.4, side: 10, lag: 0.12, fov: 45, lookAhead: 1 },
+  camera: { distance: 0, height: 2.4, framing: 14, lag: 0.12, fov: 45, lookAhead: 1 },
   /* Rollers must stay gentler than the hill. A sine of amplitude A and
    * wavelength L reaches a slope of 2*pi*A/L; once roller + chop exceed
    * tan(slopeAngle) the piste contains genuinely uphill sections, and a
@@ -334,8 +334,8 @@ const PANEL_SPEC = [
     params: [
       { path: 'camera.distance', min: 0, max: 26, step: 0.25 },
       { path: 'camera.height', min: 0, max: 14, step: 0.1 },
-      { path: 'camera.side', min: -30, max: 30, step: 0.25, key: true,
-        label: 'camera side offset', hint: 'big = side-on profile, small = behind the skier' },
+      { path: 'camera.framing', min: 4, max: 60, step: 0.5, key: true,
+        label: 'shot width (metres)', hint: 'how much hill fits across the screen. The camera pulls back to suit the phone, so this looks the same in portrait and landscape' },
       { path: 'camera.lag', min: 0.01, max: 0.9, step: 0.01 },
       { path: 'camera.fov', min: 25, max: 110, step: 1 },
       { path: 'camera.lookAhead', min: 0, max: 20, step: 0.5 },
@@ -1048,12 +1048,29 @@ const syncMeshes = () => {
  * across the frame instead of nudging the composition. That is what put
  * the rider at 25% across and drifting.
  */
+/**
+ * How far to the side the camera must sit for CONFIG.camera.framing
+ * metres of hill to span the screen.
+ *
+ * A fixed side offset does not survive rotation: the field of view is
+ * vertical, so a portrait phone sees a far narrower slice than a
+ * landscape window at the same distance — about 4.5 m against 12 m,
+ * which is the difference between a framed shot and a skier's elbow.
+ * Solving for the distance instead makes the composition the constant
+ * and the distance the consequence.
+ */
+const cameraSideDistance = () => {
+  const vFov = CONFIG.camera.fov * Math.PI / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.2, camera.aspect));
+  return (CONFIG.camera.framing * 0.5) / Math.max(0.05, Math.tan(hFov / 2));
+};
+
 const updateCamera = (dt) => {
   const p = skier.bodies.pelvis.position;
   const focusY = p.y + 0.45;
   const focusZ = p.z - CONFIG.camera.lookAhead;
 
-  const desiredX = CONFIG.camera.side;
+  const desiredX = cameraSideDistance();
   const desiredY = focusY + CONFIG.camera.height;
   const desiredZ = focusZ + CONFIG.camera.distance;
 
