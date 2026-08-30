@@ -221,7 +221,7 @@ const CONFIG = {
    * how far apart these sit IS the pump. */
   crouch: { spine: -0.6, hip: 1.15, knee: -1.15, ankle: 0.5, shoulder: 1.2, neck: -0.1 },
   extend: { spine: 0.02, hip: 0.05, knee: -0.06, ankle: -0.12, shoulder: 0.15, neck: 0.06 },
-  camera: { distance: 3, height: 1.6, side: 14, lag: 0.14, fov: 42, lookAhead: 5 },
+  camera: { distance: 0, height: 2.4, side: 10, lag: 0.12, fov: 45, lookAhead: 1 },
   /* Rollers must stay gentler than the hill. A sine of amplitude A and
    * wavelength L reaches a slope of 2*pi*A/L; once roller + chop exceed
    * tan(slopeAngle) the piste contains genuinely uphill sections, and a
@@ -231,7 +231,7 @@ const CONFIG = {
   terrain: {
     slopeAngle: 0.32,
     length: 420,
-    width: 26,
+    width: 60,
     elementSize: 1.5,
     rollerAmp: 0.7,
     rollerLength: 26,
@@ -242,7 +242,7 @@ const CONFIG = {
     lipLength: 9,
     seed: 20260830,
   },
-  world: { fogDensity: 0.008, sunElevation: 0.9, ambientLevel: 0.55 },
+  world: { fogDensity: 0.008, sunElevation: 0.9, ambientLevel: 2.2 },
   rules: { crashHeight: 0.25, crashHold: 1.6, stallSpeed: 0.8, stallDelay: 2.5 },
 };
 
@@ -373,7 +373,7 @@ const PANEL_SPEC = [
     params: [
       { path: 'world.fogDensity', min: 0, max: 0.05, step: 0.0005 },
       { path: 'world.sunElevation', min: 0.05, max: 1.55, step: 0.01 },
-      { path: 'world.ambientLevel', min: 0, max: 2, step: 0.05 },
+      { path: 'world.ambientLevel', min: 0, max: 6, step: 0.1 },
     ],
   },
 ];
@@ -516,8 +516,8 @@ const buildTerrain = () => {
   const positions = new Float32Array(nx * nz * 3);
   const colors = new Float32Array(nx * nz * 3);
   const piste = new THREE.Color(0xf2f7ff);
-  const band = new THREE.Color(0xd6e6f8);
-  const edge = new THREE.Color(0x7d8ea3);
+  const band = new THREE.Color(0xcadff5);
+  const edge = new THREE.Color(0xaebccc);
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < nz; j++) {
       const k = (i * nz + j) * 3;
@@ -525,9 +525,13 @@ const buildTerrain = () => {
       positions[k] = x;
       positions[k + 1] = profile[j];
       positions[k + 2] = -(j * es);
-      const off = clamp((Math.abs(x) - half + 5) / 5, 0, 1);
-      const stripe = Math.floor((j * es) / 20) % 2 === 0 ? 0 : 1;
-      const c = piste.clone().lerp(band, stripe * 0.55).lerp(edge, off);
+      /* Off-piste shading keyed to a fixed skiable width, not to the mesh
+       * width — the mesh got wider so the side camera would stop seeing
+       * its far edge against the sky, and tying the grey to it turned
+       * most of the visible field into off-piste. */
+      const off = clamp((Math.abs(x) - 16) / 10, 0, 1);
+      const stripe = Math.floor((j * es) / 18) % 2 === 0 ? 0 : 1;
+      const c = piste.clone().lerp(band, stripe * 0.75).lerp(edge, off * 0.7);
       colors[k] = c.r;
       colors[k + 1] = c.g;
       colors[k + 2] = c.b;
@@ -1037,23 +1041,33 @@ const syncMeshes = () => {
   }
 };
 
+/**
+ * Side-on chase. The lead is applied to the camera AND the look target,
+ * not just the target: seen from the side, "down-slope" is perpendicular
+ * to the view axis, so leading only the target slides the skier bodily
+ * across the frame instead of nudging the composition. That is what put
+ * the rider at 25% across and drifting.
+ */
 const updateCamera = (dt) => {
   const p = skier.bodies.pelvis.position;
+  const focusY = p.y + 0.45;
+  const focusZ = p.z - CONFIG.camera.lookAhead;
+
   const desiredX = CONFIG.camera.side;
-  const desiredY = p.y + CONFIG.camera.height;
-  const desiredZ = p.z + CONFIG.camera.distance;
+  const desiredY = focusY + CONFIG.camera.height;
+  const desiredZ = focusZ + CONFIG.camera.distance;
 
   if (!camState.ready) {
     camState.pos.set(desiredX, desiredY, desiredZ);
-    camState.look.set(0, p.y, p.z);
+    camState.look.set(0, focusY, focusZ);
     camState.ready = true;
   } else {
     camState.pos.x = damp(camState.pos.x, desiredX, CONFIG.camera.lag, dt);
     camState.pos.y = damp(camState.pos.y, desiredY, CONFIG.camera.lag, dt);
     camState.pos.z = damp(camState.pos.z, desiredZ, CONFIG.camera.lag, dt);
     camState.look.x = damp(camState.look.x, 0, CONFIG.camera.lag, dt);
-    camState.look.y = damp(camState.look.y, p.y + 0.3, CONFIG.camera.lag, dt);
-    camState.look.z = damp(camState.look.z, p.z - CONFIG.camera.lookAhead, CONFIG.camera.lag, dt);
+    camState.look.y = damp(camState.look.y, focusY, CONFIG.camera.lag, dt);
+    camState.look.z = damp(camState.look.z, focusZ, CONFIG.camera.lag, dt);
   }
   camera.position.copy(camState.pos);
   camera.lookAt(camState.look);
@@ -1458,7 +1472,11 @@ const boot = () => {
 
   hemi = new THREE.HemisphereLight(0xdfefff, 0x88a0b8, CONFIG.world.ambientLevel);
   scene.add(hemi);
-  sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
+  /* Three removed the legacy-lights multiplier in r155, so directional
+   * and hemisphere intensities that looked right under the old scaling
+   * come out about pi times too dim — which is why the snow rendered as
+   * grey wash rather than snow. */
+  sun = new THREE.DirectionalLight(0xfff4e0, 3);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
   sun.shadow.camera.left = -12;

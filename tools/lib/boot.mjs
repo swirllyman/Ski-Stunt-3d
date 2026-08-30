@@ -194,7 +194,15 @@ export const withPage = async (options, fn) => {
     const url = opts.debug ? base + (base.includes('?') ? '&' : '?') + 'debug=1' : base;
     await cdp.send('Page.navigate', { url: url }, session);
 
-    const value = await fn({ evaluate: evaluate, sleep: sleep, errors: errors, url: url });
+    const value = await fn({
+      evaluate: evaluate,
+      sleep: sleep,
+      errors: errors,
+      url: url,
+      /* Raw CDP, so a caller can Page.captureScreenshot and actually look
+       * at the thing rather than reason about it from numbers. */
+      send: (method, params) => cdp.send(method, params, session),
+    });
     return { skipped: false, errors: errors, value: value };
   } catch (err) {
     return { skipped: false, errors: errors.concat([String(err && err.message ? err.message : err)]), value: null };
