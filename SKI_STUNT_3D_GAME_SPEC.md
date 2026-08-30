@@ -52,7 +52,23 @@ So pop is analog and controllable, with a clear optimum: a well-timed stroke jum
 
 `pump.maxRate` turns out to be the mechanism rather than a safety limit, which was not obvious. Raising it from 6 to 14 destroys the jump entirely — every stroke flattens to 0.13 m. Capping the rate is what shapes the extension into something the legs can push the ground with; uncapped, the muscles snap through the pose without doing work on the snow. Do not "optimise" it upward.
 
-**Still unproven:** whether pumping *chains* — whether repeated well-timed strokes over the rollers build speed the way a skateboarder pumps a bowl. Pop over one compression works; sustained momentum gain across many has not been measured since the control scheme changed. That is the next measurement, and section 6's whole momentum design rests on it.
+**Pumping chains.** Measured over 24 s with an autopilot driving the analog axis off terrain curvature:
+
+| autopilot | peak speed | distance |
+|---|---|---|
+| no input | 15.9 m/s | 223 m |
+| **pumping correctly** | **20.9 m/s** | **238 m** |
+| pumping deliberately wrong | 18.9 m/s | 218 m |
+
+Correct timing wins on both counts — +31% peak speed over doing nothing. The margin over *wrong* pumping is only 10%, so the skill is real but not yet sharp; widening it is a tuning job.
+
+### The terrain has a slope budget, and breaking it stalls the run
+
+This wasted a whole measurement cycle and is worth stating plainly. A sine of amplitude A and wavelength L reaches a slope of `2·pi·A/L`. Once roller + chop exceed `tan(slopeAngle)`, the piste contains genuinely **uphill** sections, and a skier with no propulsion stops dead in the first one.
+
+The defaults did exactly that: `2·pi·1.4/26 + 2·pi·0.35/9 = 0.58` against a hill of `0.33`. Runs built to 8.7 m/s, hit an uphill roller at ~29 m, and decayed to nothing — which read as "the pump does not work" for an entire session, when the pump was fine and the hill was unskiable.
+
+Keep the sum under roughly 0.8 of `tan(slopeAngle)` until the pump is strong enough to climb. When it is, breaking the budget deliberately is how you build sections that *require* pumping.
 
 ### What the tuning cost
 

@@ -220,14 +220,20 @@ const CONFIG = {
   crouch: { spine: -0.5, hip: 0.8, knee: -0.85, ankle: 0.3, shoulder: 1, neck: -0.1 },
   extend: { spine: 0.02, hip: -0.02, knee: -0.06, ankle: -0.12, shoulder: 0.15, neck: 0.06 },
   camera: { distance: 8, height: 2.4, side: 7.5, lag: 0.14, fov: 55, lookAhead: 3.5 },
+  /* Rollers must stay gentler than the hill. A sine of amplitude A and
+   * wavelength L reaches a slope of 2*pi*A/L; once roller + chop exceed
+   * tan(slopeAngle) the piste contains genuinely uphill sections, and a
+   * skier with no propulsion simply stops in one. That is what happened:
+   * 2*pi*1.4/26 + 2*pi*0.35/9 = 0.58 against a hill of 0.33. Keep the sum
+   * under about 0.8 of tan(slopeAngle) until the pump can climb. */
   terrain: {
     slopeAngle: 0.32,
     length: 420,
     width: 26,
     elementSize: 1.5,
-    rollerAmp: 1.4,
+    rollerAmp: 0.7,
     rollerLength: 26,
-    chopAmp: 0.35,
+    chopAmp: 0.1,
     chopLength: 9,
     lipAt: 150,
     lipHeight: 2.2,
