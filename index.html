@@ -92,47 +92,71 @@
     border: 1px solid var(--edge); color: var(--ink); font-weight: 700; font-size: 12px; letter-spacing: 0.6px;
   }
 
+  /* Docked to the bottom rather than floated over the middle of the hill:
+   * the skier sits around the centre of the screen, and a panel you have
+   * to tune while watching cannot be parked on top of the thing you are
+   * watching. Height is capped so the run stays visible above it. */
   #debug {
-    position: fixed; left: 8px; top: calc(150px + var(--safe-t));
-    width: min(330px, calc(100vw - 16px)); max-height: calc(100vh - 290px - var(--safe-t));
+    position: fixed; left: 8px; bottom: calc(8px + var(--safe-b));
+    width: min(330px, calc(100vw - 16px)); max-height: min(42vh, 380px);
     display: flex; flex-direction: column;
     background: var(--panel); border: 1px solid var(--edge); border-radius: 14px;
     backdrop-filter: blur(8px); overflow: hidden; z-index: 20;
   }
+  #debug.collapsed { max-height: none; }
   #debug header {
-    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
-    border-bottom: 1px solid var(--edge); font-weight: 700; letter-spacing: 0.6px; font-size: 12px;
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px 7px 12px;
+    border-bottom: 1px solid var(--edge); font-weight: 700; letter-spacing: 0.6px; font-size: 11px;
   }
   #debug header .spacer { flex: 1; }
-  #debug .body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0 8px; }
-  #debug.collapsed .body, #debug.collapsed .actions { display: none; }
-  .dbg-section > .head {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 10px 12px; background: none; border: 0; border-top: 1px solid rgba(150,190,240,0.14);
-    color: var(--accent); font: inherit; font-weight: 700; font-size: 12px; letter-spacing: 0.7px; text-transform: uppercase;
+  #debug header button { padding: 5px 10px; font-size: 11px; }
+  /* The three fixed strips keep their natural height and only the rows
+   * scroll; without this the tabs get squeezed by the flex column and
+   * the chips render clipped through the middle. */
+  #debug header, #debug .tabs, #debug .actions { flex: 0 0 auto; }
+  #debug .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px 0 6px; }
+  #debug.collapsed .body, #debug.collapsed .actions, #debug.collapsed .tabs { display: none; }
+  /* One row of group chips instead of eleven stacked headers: the panel
+   * shows one group at a time, so its length is the longest group rather
+   * than the sum of all of them, and switching is a tap not a scroll. */
+  #debug .tabs {
+    display: flex; align-items: center; gap: 5px; padding: 7px 10px; overflow-x: auto; overflow-y: hidden;
+    border-bottom: 1px solid var(--edge); -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
-  .dbg-section > .head .caret { transition: transform 0.15s ease; opacity: 0.7; }
-  .dbg-section.closed > .head .caret { transform: rotate(-90deg); }
-  .dbg-section.closed > .rows { display: none; }
-  .dbg-row { padding: 6px 12px 10px; }
-  .dbg-row .label { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 2px; }
+  #debug .tabs::-webkit-scrollbar { display: none; }
+  #debug .tabs button {
+    flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; font: inherit; line-height: 1.2;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap;
+    background: rgba(150,190,240,0.09); border: 1px solid transparent; color: var(--ink); opacity: 0.6;
+  }
+  #debug .tabs button.on { background: rgba(94,200,255,0.16); border-color: var(--accent); color: var(--accent); opacity: 1; }
+  #debug .tabs button.primary { color: #ffd166; opacity: 0.55; }
+  #debug .tabs button.primary.on { background: rgba(255,209,102,0.14); border-color: #ffd166; color: #ffd166; }
+  /* A dot on any group holding an edit, so what you changed is findable
+   * without opening all thirteen of them. */
+  #debug .tabs button.edited::after {
+    content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 5px;
+    border-radius: 50%; background: #ffd166; vertical-align: middle;
+  }
+  #debug .caution { padding: 8px 12px 2px; font-size: 11px; line-height: 1.35; color: #ffd166; opacity: 0.75; }
+  .dbg-row { padding: 5px 12px 7px; }
+  .dbg-row .label { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
   .dbg-row .label .name { opacity: 0.85; }
   .dbg-row .label .val { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
-  .dbg-row .hint { font-size: 11px; line-height: 1.3; opacity: 0.55; margin: -1px 0 3px; }
-  .dbg-section.primary > .head { color: #ffd166; border-top: 0; }
+  .dbg-row .hint { font-size: 11px; line-height: 1.3; opacity: 0.55; margin: 1px 0 0; }
   .dbg-row.dirty .label .val { color: #ffd166; }
   .dbg-row input[type=range] {
-    width: 100%; height: 34px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none;
+    width: 100%; height: 28px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none;
   }
   .dbg-row input[type=range]::-webkit-slider-runnable-track { height: 5px; border-radius: 3px; background: rgba(150,190,240,0.3); }
   .dbg-row input[type=range]::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(150,190,240,0.3); }
   .dbg-row input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%;
+    -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%;
     background: var(--accent); border: 2px solid #04101d;
   }
-  .dbg-row input[type=range]::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); border: 2px solid #04101d; }
-  #debug .actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--edge); }
-  #debug .actions button { flex: 1; }
+  .dbg-row input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); border: 2px solid #04101d; }
+  #debug .actions { display: flex; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--edge); }
+  #debug .actions button { flex: 1; padding: 7px 6px; font-size: 11px; white-space: nowrap; }
   button {
     background: rgba(94, 200, 255, 0.16); color: var(--ink);
     border: 1px solid var(--edge); border-radius: 10px; padding: 11px 10px;
@@ -305,7 +329,7 @@ const PANEL_SPEC = [
     ],
   },
   {
-    title: 'Crouch pose',
+    title: 'Crouch',
     params: [
       { path: 'crouch.spine', min: -1.4, max: 0.4, step: 0.01 },
       { path: 'crouch.hip', min: -0.4, max: 1.8, step: 0.01 },
@@ -317,7 +341,7 @@ const PANEL_SPEC = [
     ],
   },
   {
-    title: 'Extend pose',
+    title: 'Extend',
     params: [
       { path: 'extend.spine', min: -1.4, max: 0.4, step: 0.01 },
       { path: 'extend.hip', min: -0.4, max: 1.8, step: 0.01 },
@@ -329,7 +353,7 @@ const PANEL_SPEC = [
     ],
   },
   {
-    title: 'Ragdoll rig',
+    title: 'Body',
     params: [
       { path: 'ragdoll.muscleStiffness', min: 0, max: 60000, step: 200 },
       { path: 'ragdoll.muscleDamping', min: 0, max: 800, step: 2 },
@@ -340,9 +364,6 @@ const PANEL_SPEC = [
       { path: 'ragdoll.balanceStiffness', min: 0, max: 900, step: 5 },
       { path: 'ragdoll.balanceDamping', min: 0, max: 250, step: 1 },
       { path: 'ragdoll.leanBias', min: -0.8, max: 0.8, step: 0.01 },
-      { path: 'ragdoll.limpStiffness', min: 0, max: 0.5, step: 0.01 },
-      { path: 'ragdoll.maxAngularSpeed', min: 4, max: 120, step: 1 },
-      { path: 'ragdoll.maxJointTorque', min: 20, max: 4000, step: 10 },
     ],
   },
   {
@@ -359,15 +380,10 @@ const PANEL_SPEC = [
     params: [
       { path: 'physics.gravity', min: -60, max: -4, step: 0.5, key: true,
         label: 'gravity', hint: 'heavier makes everything faster and landings harsher' },
-      { path: 'physics.groundFriction', min: 0, max: 2, step: 0.05 },
-      { path: 'physics.restitution', min: 0, max: 0.8, step: 0.01 },
-      { path: 'physics.airDrag', min: 0, max: 0.4, step: 0.005 },
-      { path: 'physics.angularDrag', min: 0, max: 0.9, step: 0.01 },
-      { path: 'physics.solverIterations', min: 4, max: 60, step: 1 },
-      { path: 'physics.fixedStep', min: 0.004, max: 0.02, step: 0.001 },
-      { path: 'physics.maxSubSteps', min: 1, max: 20, step: 1 },
-      { path: 'physics.contactStiffness', min: 1000000, max: 100000000, step: 1000000 },
-      { path: 'physics.contactRelaxation', min: 1, max: 10, step: 0.5 },
+      { path: 'physics.groundFriction', min: 0, max: 2, step: 0.05, label: 'snow grip' },
+      { path: 'physics.restitution', min: 0, max: 0.8, step: 0.01, label: 'bounciness' },
+      { path: 'physics.airDrag', min: 0, max: 0.4, step: 0.005, label: 'air drag' },
+      { path: 'physics.angularDrag', min: 0, max: 0.9, step: 0.01, label: 'tumble drag' },
     ],
   },
   {
@@ -387,17 +403,14 @@ const PANEL_SPEC = [
     params: [
       { path: 'terrain.slopeAngle', min: 0.02, max: 0.7, step: 0.01, rebuild: true, key: true,
         label: 'hill steepness', hint: 'rollers must stay gentler than this or the run stalls' },
-      { path: 'terrain.length', min: 80, max: 900, step: 20, rebuild: true },
-      { path: 'terrain.width', min: 8, max: 60, step: 2, rebuild: true },
-      { path: 'terrain.elementSize', min: 0.5, max: 4, step: 0.25, rebuild: true },
-      { path: 'terrain.rollerAmp', min: 0, max: 5, step: 0.05, rebuild: true },
-      { path: 'terrain.rollerLength', min: 6, max: 90, step: 1, rebuild: true },
-      { path: 'terrain.chopAmp', min: 0, max: 2, step: 0.05, rebuild: true },
-      { path: 'terrain.chopLength', min: 3, max: 40, step: 0.5, rebuild: true },
-      { path: 'terrain.lipAt', min: 20, max: 600, step: 5, rebuild: true },
-      { path: 'terrain.lipHeight', min: 0, max: 8, step: 0.1, rebuild: true },
-      { path: 'terrain.lipLength', min: 2, max: 40, step: 0.5, rebuild: true },
-      { path: 'terrain.seed', min: 1, max: 99999999, step: 1, rebuild: true },
+      { path: 'terrain.rollerAmp', min: 0, max: 5, step: 0.05, rebuild: true, label: 'roller height' },
+      { path: 'terrain.rollerLength', min: 6, max: 90, step: 1, rebuild: true, label: 'roller spacing' },
+      { path: 'terrain.lipHeight', min: 0, max: 8, step: 0.1, rebuild: true, label: 'lip height' },
+      { path: 'terrain.lipLength', min: 2, max: 40, step: 0.5, rebuild: true, label: 'lip length' },
+      { path: 'terrain.lipAt', min: 20, max: 600, step: 5, rebuild: true, label: 'lip position' },
+      { path: 'terrain.chopAmp', min: 0, max: 2, step: 0.05, rebuild: true, label: 'chatter height' },
+      { path: 'terrain.chopLength', min: 3, max: 40, step: 0.5, rebuild: true, label: 'chatter spacing' },
+      { path: 'terrain.length', min: 80, max: 900, step: 20, rebuild: true, label: 'run length' },
     ],
   },
   {
@@ -412,9 +425,31 @@ const PANEL_SPEC = [
   {
     title: 'World',
     params: [
-      { path: 'world.fogDensity', min: 0, max: 0.05, step: 0.0005 },
-      { path: 'world.sunElevation', min: 0.05, max: 1.55, step: 0.01 },
-      { path: 'world.ambientLevel', min: 0, max: 6, step: 0.1 },
+      { path: 'world.fogDensity', min: 0, max: 0.05, step: 0.0005, label: 'haze' },
+      { path: 'world.sunElevation', min: 0.05, max: 1.55, step: 0.01, label: 'sun height' },
+      { path: 'world.ambientLevel', min: 0, max: 6, step: 0.1, label: 'fill light' },
+    ],
+  },
+  /* Solver and safety numbers. They belong on the panel because the smoke
+   * test insists every CONFIG leaf is reachable, but none of them is a
+   * feel knob: they are found with a harness and left alone, and several
+   * will happily detonate the rig if dragged mid-run. Kept in one group
+   * at the end so browsing the panel never wades through them. */
+  {
+    title: 'Engine',
+    caution: 'Solver internals. Found with a harness, not a thumb — dragging these mid-run can blow the rig up.',
+    params: [
+      { path: 'physics.solverIterations', min: 4, max: 60, step: 1 },
+      { path: 'physics.fixedStep', min: 0.004, max: 0.02, step: 0.001 },
+      { path: 'physics.maxSubSteps', min: 1, max: 20, step: 1 },
+      { path: 'physics.contactStiffness', min: 1000000, max: 100000000, step: 1000000 },
+      { path: 'physics.contactRelaxation', min: 1, max: 10, step: 0.5 },
+      { path: 'ragdoll.limpStiffness', min: 0, max: 0.5, step: 0.01 },
+      { path: 'ragdoll.maxAngularSpeed', min: 4, max: 120, step: 1 },
+      { path: 'ragdoll.maxJointTorque', min: 20, max: 4000, step: 10 },
+      { path: 'terrain.elementSize', min: 0.5, max: 4, step: 0.25, rebuild: true },
+      { path: 'terrain.width', min: 8, max: 60, step: 2, rebuild: true },
+      { path: 'terrain.seed', min: 1, max: 99999999, step: 1, rebuild: true },
     ],
   },
 ];
@@ -1368,6 +1403,10 @@ const createDebugPanel = () => {
   header.appendChild(toggle);
   root.appendChild(header);
 
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+  root.appendChild(tabs);
+
   const body = document.createElement('div');
   body.className = 'body';
   root.appendChild(body);
@@ -1378,7 +1417,7 @@ const createDebugPanel = () => {
   };
 
   /* One slider. The same CONFIG path can appear twice — once under
-   * Essentials and once in its home section — so every edit refreshes
+   * Start here and once in its home group — so every edit refreshes
    * every row rather than just its own, and the two stay in step. */
   const buildRow = (param, withHint) => {
     const row = document.createElement('div');
@@ -1428,40 +1467,70 @@ const createDebugPanel = () => {
     return row;
   };
 
-  const addSection = (titleText, params, open, primary) => {
-    const section = document.createElement('div');
-    section.className = 'dbg-section' + (open ? '' : ' closed') + (primary ? ' primary' : '');
-    const head = document.createElement('button');
-    head.className = 'head';
-    const caret = document.createElement('span');
-    caret.className = 'caret';
-    caret.textContent = '▾';
-    const label = document.createElement('span');
-    label.textContent = titleText;
-    head.appendChild(caret);
-    head.appendChild(label);
-    head.addEventListener('click', () => section.classList.toggle('closed'));
-    section.appendChild(head);
-
-    const rowsWrap = document.createElement('div');
-    rowsWrap.className = 'rows';
-    for (let i = 0; i < params.length; i++) rowsWrap.appendChild(buildRow(params[i], primary));
-    section.appendChild(rowsWrap);
-    body.appendChild(section);
-  };
-
-  /* Sixty-eight sliders is not a tuning panel, it is a haystack. The
-   * handful that actually change how the game feels come first, open,
-   * with a line each saying what they do; everything else stays grouped
-   * and shut underneath. */
+  /* Seventy-six sliders in one scrolling column is not a tuning panel, it
+   * is a haystack — and stacking every group's header in that column
+   * means finding one knob is a scroll past ten others. Groups are tabs
+   * instead: exactly one is on screen, so the panel is only ever as long
+   * as its longest group. Start here holds the handful that actually
+   * change how the game feels, each with a line saying what it does. */
   const essentials = [];
   for (let i = 0; i < PANEL_SPEC.length; i++) {
     for (let j = 0; j < PANEL_SPEC[i].params.length; j++) {
       if (PANEL_SPEC[i].params[j].key === true) essentials.push(PANEL_SPEC[i].params[j]);
     }
   }
-  addSection('Start here', essentials, true, true);
-  for (let i = 0; i < PANEL_SPEC.length; i++) addSection(PANEL_SPEC[i].title, PANEL_SPEC[i].params, false, false);
+  const groups = [{ title: 'Start here', params: essentials, primary: true }].concat(PANEL_SPEC);
+
+  const panes = [];
+  const chips = [];
+  const show = (index) => {
+    for (let i = 0; i < panes.length; i++) {
+      panes[i].hidden = i !== index;
+      chips[i].classList.toggle('on', i === index);
+    }
+    /* Thirteen chips do not fit across a phone, so the one you just
+     * picked can be off the end of the strip. Drag it back into view. */
+    const chip = chips[index];
+    const left = chip.offsetLeft - (tabs.clientWidth - chip.offsetWidth) / 2;
+    tabs.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    body.scrollTop = 0;
+  };
+
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const chip = document.createElement('button');
+    chip.textContent = group.title;
+    chip.className = group.primary ? 'primary' : '';
+    chip.addEventListener('click', () => show(i));
+    tabs.appendChild(chip);
+    chips.push(chip);
+
+    const pane = document.createElement('div');
+    if (group.caution) {
+      const note = document.createElement('div');
+      note.className = 'caution';
+      note.textContent = group.caution;
+      pane.appendChild(note);
+    }
+    for (let j = 0; j < group.params.length; j++) {
+      pane.appendChild(buildRow(group.params[j], !!group.primary));
+    }
+    body.appendChild(pane);
+    panes.push(pane);
+
+    /* Mark the chip when anything inside it has drifted from the
+     * committed values, so an edit is findable without opening all
+     * thirteen groups looking for it. */
+    rows.push(() => {
+      let edited = false;
+      for (let j = 0; j < group.params.length && !edited; j++) {
+        const path = group.params[j].path;
+        edited = getPath(CONFIG, path) !== getPath(COMMITTED, path);
+      }
+      chip.classList.toggle('edited', edited);
+    });
+  }
+  show(0);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
@@ -1471,7 +1540,8 @@ const createDebugPanel = () => {
   copyBtn.addEventListener('click', () => copyToClipboard(serializeConfig()));
 
   const resetBtn = document.createElement('button');
-  resetBtn.textContent = 'RESET TO COMMITTED';
+  /* Named apart from the RESET in the corner, which restarts the run. */
+  resetBtn.textContent = 'REVERT ALL';
   resetBtn.addEventListener('click', () => {
     const sections = Object.keys(COMMITTED);
     for (let i = 0; i < sections.length; i++) {
