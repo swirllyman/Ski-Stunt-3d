@@ -257,6 +257,8 @@ const CONFIG = {
     headDamping: 12,
     balanceStiffness: 220,
     balanceDamping: 42,
+    mirrorStiffness: 4000,
+    mirrorDamping: 120,
     leanBias: 0,
     limpStiffness: 0.05,
     maxAngularSpeed: 34,
@@ -363,6 +365,9 @@ const PANEL_SPEC = [
       { path: 'ragdoll.headDamping', min: 0, max: 80, step: 0.5 },
       { path: 'ragdoll.balanceStiffness', min: 0, max: 900, step: 5 },
       { path: 'ragdoll.balanceDamping', min: 0, max: 250, step: 1 },
+      { path: 'ragdoll.mirrorStiffness', min: 0, max: 40000, step: 200, key: true,
+        label: 'leg pairing', hint: 'holds the two legs together above the skis. At zero the skis unlink too and the skier does the splits' },
+      { path: 'ragdoll.mirrorDamping', min: 0, max: 600, step: 5, label: 'pairing damping' },
       { path: 'ragdoll.leanBias', min: -0.8, max: 0.8, step: 0.01 },
       { path: 'ragdoll.maxJointTorque', min: 20, max: 8000, step: 10, key: true,
         label: 'leg strength', hint: 'the hardest push the muscles are allowed. This, not pop speed, is what sets how high you get' },
@@ -671,6 +676,22 @@ const JOINTS = [
   { name: 'ankleR', a: 'shinR', b: 'skiR', pa: [0, -0.22, 0], pb: [0, 0.02, 0.1], posture: 'ankle' },
 ];
 
+/* The spec treats each limb pair as one joint — "both legs treated as
+ * one" — but nothing was enforcing it. The plane lock stops the legs
+ * splitting sideways, so it looked handled; it does nothing about the
+ * sagittal plane, where the two legs are independent bodies free to
+ * scissor fore and aft. Pumping drove them 84 degrees apart with the skis
+ * 1.46 m from each other, which is the splits the rider does. Paired by
+ * name here, and pulled together by applyMirror below. */
+const MIRROR_PAIRS = [];
+for (let i = 0; i < JOINTS.length; i++) {
+  if (JOINTS[i].name.charAt(JOINTS[i].name.length - 1) !== 'L') continue;
+  const twinName = JOINTS[i].name.slice(0, -1) + 'R';
+  for (let k = 0; k < JOINTS.length; k++) {
+    if (JOINTS[k].name === twinName) MIRROR_PAIRS.push([JOINTS[i], JOINTS[k]]);
+  }
+}
+
 const PLANE_LINEAR = new CANNON.Vec3(0, 1, 1);
 const PLANE_ANGULAR = new CANNON.Vec3(1, 0, 0);
 
@@ -828,6 +849,32 @@ const buildSkier = () => {
     constraints.push(c);
   }
 
+  /* Tie the two skis into one unit. The spec's rig is five or six
+   * mirrored joints — "both legs treated as one" — and a corrective
+   * muscle across each pair could not deliver that on its own: even at
+   * stiffness it was strong enough to cost distance, the legs still
+   * scissored past 60 degrees on hard landings.
+   *
+   * Two point constraints a metre apart down the skis leave no relative
+   * pitch and no relative slide between them, which under the plane lock
+   * is a rigid pair. Point-to-point for the same reason every joint is:
+   * it is the one constraint type the masked solver handles cleanly.
+   * The mirror muscle stays on above the skis, where the hips and knees
+   * still want to move together but should keep some give. */
+  if (CONFIG.ragdoll.mirrorStiffness > 0) {
+    const halfGap = (bodies.skiR.position.x - bodies.skiL.position.x) * 0.5;
+    for (let i = 0; i < 2; i++) {
+      const along = i === 0 ? -0.5 : 0.5;
+      const link = new CANNON.PointToPointConstraint(
+        bodies.skiL, new CANNON.Vec3(halfGap, 0, along),
+        bodies.skiR, new CANNON.Vec3(-halfGap, 0, along)
+      );
+      link.collideConnected = false;
+      world.addConstraint(link);
+      constraints.push(link);
+    }
+  }
+
   skier = {
     bodies: bodies,
     meshes: meshes,
@@ -887,6 +934,39 @@ const driveJoint = (parent, child, targetAngle, stiffness, damping) => {
   tmpTorque.set(clamp(accel * reduced, -cap, cap), 0, 0);
   child.torque.vadd(tmpTorque, child.torque);
   parent.torque.vsub(tmpTorque, parent.torque);
+};
+
+/* A muscle across each pair rather than a constraint between them: the
+ * legs still move independently under load, they just cannot walk away
+ * from one another. Driving the difference to zero (rather than welding
+ * both to a shared angle) keeps every existing muscle and contact intact,
+ * so the rig can still absorb a one-ski landing. */
+const applyMirror = (scale) => {
+  const stiffness = CONFIG.ragdoll.mirrorStiffness * scale;
+  const damping = CONFIG.ragdoll.mirrorDamping * scale;
+  if (stiffness <= 0 && damping <= 0) return;
+  const cap = CONFIG.ragdoll.maxJointTorque;
+  for (let i = 0; i < MIRROR_PAIRS.length; i++) {
+    const leftParent = skier.bodies[MIRROR_PAIRS[i][0].a];
+    const left = skier.bodies[MIRROR_PAIRS[i][0].b];
+    const rightParent = skier.bodies[MIRROR_PAIRS[i][1].a];
+    const right = skier.bodies[MIRROR_PAIRS[i][1].b];
+
+    let error = (pitchOf(right) - pitchOf(rightParent)) - (pitchOf(left) - pitchOf(leftParent));
+    while (error > Math.PI) error -= Math.PI * 2;
+    while (error < -Math.PI) error += Math.PI * 2;
+    const rate = (right.angularVelocity.x - rightParent.angularVelocity.x) -
+      (left.angularVelocity.x - leftParent.angularVelocity.x);
+    const accel = error * stiffness - rate * damping;
+
+    const il = inertiaAbout(left, 1, 0, 0);
+    const ir = inertiaAbout(right, 1, 0, 0);
+    const reduced = (il * ir) / (il + ir + 1e-9);
+    tmpTorque.set(clamp(accel * reduced, -cap, cap), 0, 0);
+    /* Equal and opposite across the pair, so the rig gains no net spin. */
+    left.torque.vadd(tmpTorque, left.torque);
+    right.torque.vsub(tmpTorque, right.torque);
+  }
 };
 
 const driveMuscles = (stiffnessScale) => {
@@ -1106,6 +1186,8 @@ const stepGame = (dt) => {
         CONFIG.ragdoll.muscleStiffness * limp, CONFIG.ragdoll.muscleDamping * limp);
     }
   }
+
+  applyMirror(limp);
 
   if (run.state !== 'crashed') {
     applyBalance(grounded);
