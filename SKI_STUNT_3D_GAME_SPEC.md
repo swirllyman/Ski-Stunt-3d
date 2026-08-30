@@ -42,15 +42,16 @@ Measured by scripting strokes of different durations from the same loaded crouch
 
 | stroke | peak ski clearance | air |
 |---|---|---|
-| 0.05 s | 0.06 m | — |
-| **0.12 s** | **0.41 m** | **0.47 s** |
-| 0.25 s | 0.13 m | — |
-| 0.5 s | 0.13 m | — |
-| 1.0 s | 0.13 m | — |
+| 0.05 s | 0.30 m | 0.13 s |
+| 0.12 s | 0.18 m | — |
+| 0.25 s | 0.07 m | — |
+| 1.0 s | 0.09 m | — |
 
-So pop is analog and controllable, with a clear optimum: a well-timed stroke jumps three times as high as a lazy shove. That is a real skill to learn, and it is the mechanic section 1 asks for.
+So pop is analog and monotonic: a fast stroke jumps four times as high as a slow one, and the relationship is predictable rather than a hidden sweet spot.
 
-`pump.maxRate` turns out to be the mechanism rather than a safety limit, which was not obvious. Raising it from 6 to 14 destroys the jump entirely — every stroke flattens to 0.13 m. Capping the rate is what shapes the extension into something the legs can push the ground with; uncapped, the muscles snap through the pose without doing work on the snow. Do not "optimise" it upward.
+**Where the pop comes from is leg travel, and it was nearly zero.** With a 0.85 rad knee bend the hip-to-ankle distance is 0.784 m against 0.86 m straight — 7.6 cm of travel to push the whole skier with. Deepening the crouch to 1.15 rad triples it. The resting stance is unchanged: `pump.neutral` at 0.5 still lands on knee -0.83, so only the extremes moved.
+
+**The pop is capped by ride stability, and the trade is steep.** Raising `ragdoll.maxJointTorque` from 700 to 1600 gets 0.51 m of clearance and 0.43 s of air — and wrecks the run, which drops from 273 m clean to 22 m with crashes. 700 is the setting that keeps a run alive. If a bigger pop matters more than a long run, that is the slider, and it is honest about what it costs.
 
 **Pumping chains.** Measured over 24 s with an autopilot driving the analog axis off terrain curvature:
 

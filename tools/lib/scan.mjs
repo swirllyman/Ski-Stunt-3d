@@ -158,8 +158,14 @@ export const stripLiterals = (src) => {
           else if (src[j] === '\n') break;
           j++;
         }
+        /* ...and the flags. Leaving them behind makes the `g` of a
+         * /.../g read as a bare identifier, which the reference scan
+         * then reports as undefined. */
+        let flags = j + 1;
+        while (flags < src.length && /[a-z]/.test(src[flags])) flags++;
         blank(i + 1, j);
-        i = j + 1;
+        blank(j + 1, flags);
+        i = flags;
         continue;
       }
     }

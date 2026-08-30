@@ -110,6 +110,8 @@
   .dbg-row .label { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 2px; }
   .dbg-row .label .name { opacity: 0.85; }
   .dbg-row .label .val { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
+  .dbg-row .hint { font-size: 11px; line-height: 1.3; opacity: 0.55; margin: -1px 0 3px; }
+  .dbg-section.primary > .head { color: #ffd166; border-top: 0; }
   .dbg-row.dirty .label .val { color: #ffd166; }
   .dbg-row input[type=range] {
     width: 100%; height: 34px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none;
@@ -195,8 +197,8 @@ const CONFIG = {
   },
   pump: {
     neutral: 0.5,
-    dragRange: 0.32,
-    maxRate: 6,
+    dragRange: 0.16,
+    maxRate: 10,
     response: 30,
     releaseLag: 0.35,
   },
@@ -217,9 +219,9 @@ const CONFIG = {
   /* The two ends of the single control axis. Everything the player does
    * is a blend between these two postures — there is no jump button, so
    * how far apart these sit IS the pump. */
-  crouch: { spine: -0.5, hip: 0.8, knee: -0.85, ankle: 0.3, shoulder: 1, neck: -0.1 },
-  extend: { spine: 0.02, hip: -0.02, knee: -0.06, ankle: -0.12, shoulder: 0.15, neck: 0.06 },
-  camera: { distance: 8, height: 2.4, side: 7.5, lag: 0.14, fov: 55, lookAhead: 3.5 },
+  crouch: { spine: -0.6, hip: 1.15, knee: -1.15, ankle: 0.5, shoulder: 1.2, neck: -0.1 },
+  extend: { spine: 0.02, hip: 0.05, knee: -0.06, ankle: -0.12, shoulder: 0.15, neck: 0.06 },
+  camera: { distance: 3, height: 1.6, side: 14, lag: 0.14, fov: 42, lookAhead: 5 },
   /* Rollers must stay gentler than the hill. A sine of amplitude A and
    * wavelength L reaches a slope of 2*pi*A/L; once roller + chop exceed
    * tan(slopeAngle) the piste contains genuinely uphill sections, and a
@@ -250,11 +252,15 @@ const PANEL_SPEC = [
   {
     title: 'Pump',
     params: [
-      { path: 'pump.neutral', min: 0, max: 1, step: 0.01 },
-      { path: 'pump.dragRange', min: 0.05, max: 1, step: 0.01 },
-      { path: 'pump.maxRate', min: 0.5, max: 30, step: 0.5 },
-      { path: 'pump.response', min: 1, max: 120, step: 1 },
-      { path: 'pump.releaseLag', min: 0.02, max: 2, step: 0.02 },
+      { path: 'pump.dragRange', min: 0.03, max: 1, step: 0.01, key: true,
+        label: 'slide distance', hint: 'how far your thumb travels for a full crouch-to-stand' },
+      { path: 'pump.maxRate', min: 0.5, max: 30, step: 0.5, key: true,
+        label: 'pop speed', hint: 'how fast the legs may unfold. Higher = snappier pop, to a point' },
+      { path: 'pump.neutral', min: 0, max: 1, step: 0.01, key: true,
+        label: 'resting stance', hint: 'how bent the skier stands when you are not touching' },
+      { path: 'pump.releaseLag', min: 0.02, max: 2, step: 0.02,
+        label: 'release settle', hint: 'how slowly the body returns to rest after you let go' },
+      { path: 'pump.response', min: 1, max: 120, step: 1, label: 'finger tracking' },
     ],
   },
   {
@@ -262,7 +268,8 @@ const PANEL_SPEC = [
     params: [
       { path: 'crouch.spine', min: -1.4, max: 0.4, step: 0.01 },
       { path: 'crouch.hip', min: -0.4, max: 1.8, step: 0.01 },
-      { path: 'crouch.knee', min: -1.8, max: 0.3, step: 0.01 },
+      { path: 'crouch.knee', min: -1.8, max: 0.3, step: 0.01, key: true,
+        label: 'crouch depth (knee)', hint: 'more bend = more to push against = more pop' },
       { path: 'crouch.ankle', min: -0.8, max: 1, step: 0.01 },
       { path: 'crouch.shoulder', min: -0.6, max: 2, step: 0.01 },
       { path: 'crouch.neck', min: -0.8, max: 0.8, step: 0.01 },
@@ -273,7 +280,8 @@ const PANEL_SPEC = [
     params: [
       { path: 'extend.spine', min: -1.4, max: 0.4, step: 0.01 },
       { path: 'extend.hip', min: -0.4, max: 1.8, step: 0.01 },
-      { path: 'extend.knee', min: -1.8, max: 0.3, step: 0.01 },
+      { path: 'extend.knee', min: -1.8, max: 0.3, step: 0.01, key: true,
+        label: 'stand height (knee)', hint: 'how straight the leg gets at the top of the stroke' },
       { path: 'extend.ankle', min: -0.8, max: 1, step: 0.01 },
       { path: 'extend.shoulder', min: -0.6, max: 2, step: 0.01 },
       { path: 'extend.neck', min: -0.8, max: 0.8, step: 0.01 },
@@ -308,7 +316,8 @@ const PANEL_SPEC = [
   {
     title: 'Physics',
     params: [
-      { path: 'physics.gravity', min: -60, max: -4, step: 0.5 },
+      { path: 'physics.gravity', min: -60, max: -4, step: 0.5, key: true,
+        label: 'gravity', hint: 'heavier makes everything faster and landings harsher' },
       { path: 'physics.groundFriction', min: 0, max: 2, step: 0.05 },
       { path: 'physics.restitution', min: 0, max: 0.8, step: 0.01 },
       { path: 'physics.airDrag', min: 0, max: 0.4, step: 0.005 },
@@ -325,7 +334,8 @@ const PANEL_SPEC = [
     params: [
       { path: 'camera.distance', min: 0, max: 26, step: 0.25 },
       { path: 'camera.height', min: 0, max: 14, step: 0.1 },
-      { path: 'camera.side', min: -20, max: 20, step: 0.25 },
+      { path: 'camera.side', min: -30, max: 30, step: 0.25, key: true,
+        label: 'camera side offset', hint: 'big = side-on profile, small = behind the skier' },
       { path: 'camera.lag', min: 0.01, max: 0.9, step: 0.01 },
       { path: 'camera.fov', min: 25, max: 110, step: 1 },
       { path: 'camera.lookAhead', min: 0, max: 20, step: 0.5 },
@@ -334,7 +344,8 @@ const PANEL_SPEC = [
   {
     title: 'Terrain',
     params: [
-      { path: 'terrain.slopeAngle', min: 0.02, max: 0.7, step: 0.01, rebuild: true },
+      { path: 'terrain.slopeAngle', min: 0.02, max: 0.7, step: 0.01, rebuild: true, key: true,
+        label: 'hill steepness', hint: 'rollers must stay gentler than this or the run stalls' },
       { path: 'terrain.length', min: 80, max: 900, step: 20, rebuild: true },
       { path: 'terrain.width', min: 8, max: 60, step: 2, rebuild: true },
       { path: 'terrain.elementSize', min: 0.5, max: 4, step: 0.25, rebuild: true },
@@ -1198,13 +1209,20 @@ const copyToClipboard = (text) => {
   document.body.removeChild(ta);
 };
 
+/** "muscleStiffness" reads better as "muscle stiffness" on a phone. */
+const prettyLabel = (param) => {
+  if (param.label) return param.label;
+  const leaf = param.path.split('.')[1];
+  return leaf.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+};
+
 const createDebugPanel = () => {
   const root = document.createElement('div');
   root.id = 'debug';
 
   const header = document.createElement('header');
   const title = document.createElement('span');
-  title.textContent = 'DEBUG';
+  title.textContent = 'TUNING';
   const spacer = document.createElement('span');
   spacer.className = 'spacer';
   const toggle = document.createElement('button');
@@ -1223,19 +1241,71 @@ const createDebugPanel = () => {
   root.appendChild(body);
 
   const rows = [];
+  const refreshAll = () => {
+    for (let i = 0; i < rows.length; i++) rows[i]();
+  };
 
-  for (let s = 0; s < PANEL_SPEC.length; s++) {
-    const spec = PANEL_SPEC[s];
+  /* One slider. The same CONFIG path can appear twice — once under
+   * Essentials and once in its home section — so every edit refreshes
+   * every row rather than just its own, and the two stay in step. */
+  const buildRow = (param, withHint) => {
+    const row = document.createElement('div');
+    row.className = 'dbg-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'label';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = prettyLabel(param) + (param.rebuild ? ' ↻' : '');
+    const val = document.createElement('span');
+    val.className = 'val';
+    labelRow.appendChild(name);
+    labelRow.appendChild(val);
+    row.appendChild(labelRow);
+
+    if (withHint && param.hint) {
+      const hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = param.hint;
+      row.appendChild(hint);
+    }
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(param.min);
+    slider.max = String(param.max);
+    slider.step = String(param.step);
+
+    const refresh = () => {
+      const current = getPath(CONFIG, param.path);
+      slider.value = String(current);
+      val.textContent = formatValue(current, param.step);
+      row.classList.toggle('dirty', current !== getPath(COMMITTED, param.path));
+    };
+
+    slider.addEventListener('input', () => {
+      setPath(CONFIG, param.path, Number(slider.value));
+      refreshAll();
+      applyConfig();
+      if (param.rebuild) scheduleRebuild();
+    });
+
+    refresh();
+    rows.push(refresh);
+    row.appendChild(slider);
+    return row;
+  };
+
+  const addSection = (titleText, params, open, primary) => {
     const section = document.createElement('div');
-    section.className = s === 0 ? 'dbg-section' : 'dbg-section closed';
-
+    section.className = 'dbg-section' + (open ? '' : ' closed') + (primary ? ' primary' : '');
     const head = document.createElement('button');
     head.className = 'head';
     const caret = document.createElement('span');
     caret.className = 'caret';
     caret.textContent = '▾';
     const label = document.createElement('span');
-    label.textContent = spec.title;
+    label.textContent = titleText;
     head.appendChild(caret);
     head.appendChild(label);
     head.addEventListener('click', () => section.classList.toggle('closed'));
@@ -1243,53 +1313,23 @@ const createDebugPanel = () => {
 
     const rowsWrap = document.createElement('div');
     rowsWrap.className = 'rows';
-
-    for (let p = 0; p < spec.params.length; p++) {
-      const param = spec.params[p];
-      const row = document.createElement('div');
-      row.className = 'dbg-row';
-
-      const labelRow = document.createElement('div');
-      labelRow.className = 'label';
-      const name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = param.path.split('.')[1] + (param.rebuild ? ' ↻' : '');
-      const val = document.createElement('span');
-      val.className = 'val';
-      labelRow.appendChild(name);
-      labelRow.appendChild(val);
-
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = String(param.min);
-      slider.max = String(param.max);
-      slider.step = String(param.step);
-      slider.value = String(getPath(CONFIG, param.path));
-
-      const refresh = () => {
-        const current = getPath(CONFIG, param.path);
-        slider.value = String(current);
-        val.textContent = formatValue(current, param.step);
-        row.classList.toggle('dirty', current !== getPath(COMMITTED, param.path));
-      };
-
-      slider.addEventListener('input', () => {
-        setPath(CONFIG, param.path, Number(slider.value));
-        refresh();
-        applyConfig();
-        if (param.rebuild) scheduleRebuild();
-      });
-
-      refresh();
-      rows.push(refresh);
-      row.appendChild(labelRow);
-      row.appendChild(slider);
-      rowsWrap.appendChild(row);
-    }
-
+    for (let i = 0; i < params.length; i++) rowsWrap.appendChild(buildRow(params[i], primary));
     section.appendChild(rowsWrap);
     body.appendChild(section);
+  };
+
+  /* Sixty-eight sliders is not a tuning panel, it is a haystack. The
+   * handful that actually change how the game feels come first, open,
+   * with a line each saying what they do; everything else stays grouped
+   * and shut underneath. */
+  const essentials = [];
+  for (let i = 0; i < PANEL_SPEC.length; i++) {
+    for (let j = 0; j < PANEL_SPEC[i].params.length; j++) {
+      if (PANEL_SPEC[i].params[j].key === true) essentials.push(PANEL_SPEC[i].params[j]);
+    }
   }
+  addSection('Start here', essentials, true, true);
+  for (let i = 0; i < PANEL_SPEC.length; i++) addSection(PANEL_SPEC[i].title, PANEL_SPEC[i].params, false, false);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
@@ -1306,7 +1346,7 @@ const createDebugPanel = () => {
       const keys = Object.keys(COMMITTED[sections[i]]);
       for (let k = 0; k < keys.length; k++) CONFIG[sections[i]][keys[k]] = COMMITTED[sections[i]][keys[k]];
     }
-    for (let i = 0; i < rows.length; i++) rows[i]();
+    refreshAll();
     applyConfig();
     resetRun(true);
     showToast('Reset to committed');
