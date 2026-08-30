@@ -1055,7 +1055,7 @@ const applyBalance = (grounded, dt) => {
     while (drift < -Math.PI) drift += Math.PI * 2;
     const settle = 1 - Math.abs(run.lean);
     const spin = pelvis.angularVelocity.x;
-    applyRigAccel(run.lean * CONFIG.lean.airTorque +
+    applyRigAccel(-run.lean * CONFIG.lean.airTorque +
       dampedAccel(drift, spin, CONFIG.lean.airLevel, CONFIG.lean.airDamping, dt) * settle -
       clamp(spin * CONFIG.lean.spinDrag, -Math.abs(spin) / Math.max(dt, 1e-6),
         Math.abs(spin) / Math.max(dt, 1e-6)));
@@ -1064,8 +1064,17 @@ const applyBalance = (grounded, dt) => {
 
   /* On the snow it is weight, not rotation: the balance target tips fore
    * and aft, so leaning presses the tips or the tails rather than
-   * spinning the rider on the spot. */
-  const target = -slopeAt(pelvis.position.z) + CONFIG.ragdoll.leanBias +
+   * spinning the rider on the spot.
+   *
+   * Both signs are negated against run.lean because positive lean means
+   * forward — the direction of travel, as the input's own keys.fwd says.
+   * A positive rotation about X carries the rider's head backwards on
+   * screen, so dragging the way you are going was flipping you away from
+   * it: a right drag gave a backflip. Checked against rendered frames
+   * rather than reasoned about, because the chain from drag to screen
+   * runs through a camera on the far side of the plane and is exactly the
+   * kind of thing that comes out inverted. */
+  const target = -slopeAt(pelvis.position.z) + CONFIG.ragdoll.leanBias -
     run.lean * CONFIG.lean.groundRange;
   let error = target - pitchOf(pelvis);
   while (error > Math.PI) error -= Math.PI * 2;
