@@ -67,16 +67,24 @@
     pointer-events: none; transition: opacity 0.3s ease; white-space: nowrap;
   }
   #hint.hidden { opacity: 0; }
-  /* Where the finger went down, and where it is now: the pump made visible. */
-  #grab {
-    position: fixed; left: 0; top: 0; width: 2px; pointer-events: none;
-    background: linear-gradient(180deg, rgba(94,200,255,0), var(--accent), rgba(94,200,255,0));
-    opacity: 0; transition: opacity 0.12s ease;
+  /* Where the finger went down and where it is now. Two axes, so it is a
+     ring and a dot rather than a slider track. */
+  #grab { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.12s ease; }
+  #grab.on { opacity: 1; }
+  #grab .anchor, #grab .dot { position: absolute; border-radius: 50%; }
+  #grab .anchor {
+    width: 54px; height: 54px; margin: -27px 0 0 -27px;
+    border: 2px dashed rgba(94,200,255,0.5);
   }
-  #grab.on { opacity: 0.9; }
   #grab .dot {
-    position: absolute; left: -13px; width: 28px; height: 28px; border-radius: 50%;
-    border: 2px solid var(--accent); background: rgba(94,200,255,0.22);
+    width: 30px; height: 30px; margin: -15px 0 0 -15px;
+    border: 2px solid var(--accent); background: rgba(94,200,255,0.28);
+  }
+  /* The stick between the two is the input itself: its length and angle
+   * are what the skier is being told to do, on both axes at once. */
+  #grab .link {
+    position: absolute; height: 2px; transform-origin: 0 50%;
+    background: linear-gradient(90deg, rgba(94,200,255,0.15), rgba(94,200,255,0.75));
   }
   #btn-reset {
     position: fixed; right: 10px; top: calc(10px + var(--safe-t));
@@ -153,8 +161,8 @@
 <button id="btn-reset">RESET</button>
 <div id="toast"></div>
 
-<div id="hint">touch anywhere, then slide &#8597; to pump</div>
-<div id="grab"><div class="dot" id="grab-dot"></div></div>
+<div id="hint">touch anywhere &middot; &#8597; pump &middot; &#8596; lean</div>
+<div id="grab"><div class="anchor" id="grab-anchor"></div><div class="link" id="grab-link"></div><div class="dot" id="grab-dot"></div></div>
 
 <pre id="boot-error"></pre>
 
@@ -201,6 +209,20 @@ const CONFIG = {
     maxRate: 10,
     response: 30,
     releaseLag: 0.35,
+  },
+  /* The horizontal half of the stroke. Vertical pumps; horizontal shifts
+   * weight fore and aft on the snow and drives rotation in the air. Same
+   * gesture, and which one it means depends only on whether the skis are
+   * touching — the reference game's whole trick. */
+  lean: {
+    dragRange: 0.22,
+    response: 14,
+    returnLag: 0.3,
+    groundRange: 0.5,
+    airTorque: 13,
+    airDamping: 17,
+    airLevel: 70,
+    spinDrag: 2,
   },
   ragdoll: {
     muscleStiffness: 20000,
@@ -261,6 +283,25 @@ const PANEL_SPEC = [
       { path: 'pump.releaseLag', min: 0.02, max: 2, step: 0.02,
         label: 'release settle', hint: 'how slowly the body returns to rest after you let go' },
       { path: 'pump.response', min: 1, max: 120, step: 1, label: 'finger tracking' },
+    ],
+  },
+  {
+    title: 'Lean',
+    params: [
+      { path: 'lean.dragRange', min: 0.03, max: 1, step: 0.01, key: true,
+        label: 'lean distance', hint: 'how far your thumb travels sideways for a full lean' },
+      { path: 'lean.airTorque', min: 0, max: 60, step: 0.5, key: true,
+        label: 'air rotation', hint: 'how hard sideways spins you in the air. This is your flip control' },
+      { path: 'lean.groundRange', min: 0, max: 1.4, step: 0.02, key: true,
+        label: 'weight shift', hint: 'how far forward/back you can throw your weight on the snow' },
+      { path: 'lean.spinDrag', min: 0.2, max: 20, step: 0.1,
+        label: 'spin top speed', hint: 'air drag on rotation. Lower spins faster: full lean tops out at air rotation divided by this' },
+      { path: 'lean.airLevel', min: 0, max: 300, step: 5,
+        label: 'self-righting', hint: 'how hard the skier finds level on its own with no input. Zero means every landing is yours to save' },
+      { path: 'lean.airDamping', min: 0, max: 60, step: 0.5,
+        label: 'settle damping', hint: 'stops self-righting from wobbling past level. Pairs with self-righting, not with spins' },
+      { path: 'lean.response', min: 1, max: 120, step: 1, label: 'finger tracking' },
+      { path: 'lean.returnLag', min: 0.02, max: 2, step: 0.02, label: 'centring speed' },
     ],
   },
   {
@@ -445,7 +486,7 @@ const camState = { pos: new THREE.Vector3(), look: new THREE.Vector3(), ready: f
  * finger lands so the stroke never jumps, and from then on posture
  * tracks the finger. How FAST you slide is how hard the skier extends,
  * which is the whole point: the pop is analog, not a button. */
-const pointerState = { active: false, anchorY: 0, anchorPosture: 0.5, target: 0.5, x: 0, y: 0 };
+const pointerState = { active: false, anchorX: 0, anchorY: 0, anchorPosture: 0.5, anchorLean: 0, target: 0.5, leanTarget: 0, x: 0, y: 0 };
 
 const probe = { booted: false, frames: 0, gl: false, debug: false, error: null, run: null, config: null, pointer: null };
 window.__ski = probe;
@@ -453,6 +494,7 @@ window.__ski = probe;
 const run = {
   state: 'ready',
   posture: 0.45,
+  lean: 0,
   distance: 0,
   momentum: 0,
   airTime: 0,
@@ -865,9 +907,39 @@ const applyRigAccel = (accelX) => {
   }
 };
 
-const applyBalance = () => {
+const applyBalance = (grounded) => {
   const pelvis = skier.bodies.pelvis;
-  const target = -slopeAt(pelvis.position.z) + CONFIG.ragdoll.leanBias;
+
+  if (!grounded) {
+    /* Off the snow the same axis becomes rotation rather than weight.
+     * airLevel pulls back toward level so a rider who touches nothing
+     * drifts flat instead of tumbling, and it fades out with how far the
+     * player has pushed the axis: commit to a lean and it is gone, so a
+     * full input rotates freely rather than fighting a spring stronger
+     * than it is. Its damping fades with it — that damping exists to stop
+     * the levelling overshooting, and left switched on it ate the spin as
+     * well, so a full lean turned barely faster than no input at all.
+     * What survives a commit is spinDrag alone, which is small and only
+     * sets the top rotation speed (airTorque / spinDrag). Getting the skis
+     * back under you before you land stays the trick the reference game is
+     * about — the levelling only stops a hands-off pump from being an
+     * automatic wipeout. */
+    let drift = -slopeAt(pelvis.position.z) + CONFIG.ragdoll.leanBias - pitchOf(pelvis);
+    while (drift > Math.PI) drift -= Math.PI * 2;
+    while (drift < -Math.PI) drift += Math.PI * 2;
+    const settle = 1 - Math.abs(run.lean);
+    applyRigAccel(run.lean * CONFIG.lean.airTorque +
+      (drift * CONFIG.lean.airLevel -
+        pelvis.angularVelocity.x * CONFIG.lean.airDamping) * settle -
+      pelvis.angularVelocity.x * CONFIG.lean.spinDrag);
+    return;
+  }
+
+  /* On the snow it is weight, not rotation: the balance target tips fore
+   * and aft, so leaning presses the tips or the tails rather than
+   * spinning the rider on the spot. */
+  const target = -slopeAt(pelvis.position.z) + CONFIG.ragdoll.leanBias +
+    run.lean * CONFIG.lean.groundRange;
   let error = target - pitchOf(pelvis);
   while (error > Math.PI) error -= Math.PI * 2;
   while (error < -Math.PI) error += Math.PI * 2;
@@ -891,6 +963,10 @@ const updatePosture = (dt) => {
   const wanted = damp(run.posture, target, lag, dt);
   const step = CONFIG.pump.maxRate * dt;
   run.posture = clamp(run.posture + clamp(wanted - run.posture, -step, step), 0, 1);
+
+  const leanTo = pointerState.active ? pointerState.leanTarget : 0;
+  const leanLag = pointerState.active ? 1 / Math.max(1, CONFIG.lean.response) : CONFIG.lean.returnLag;
+  run.lean = clamp(damp(run.lean, leanTo, leanLag, dt), -1, 1);
 };
 
 const skiGrounded = (ski) => (ski.position.y - 0.02) - heightAt(ski.position.z) < CONFIG.ski.contactTolerance;
@@ -929,6 +1005,7 @@ const resetRun = (rebuildWorld) => {
     buildTerrain();
   }
   run.posture = CONFIG.pump.neutral;
+  run.lean = 0;
   buildSkier();
   run.state = 'ready';
   run.distance = 0;
@@ -986,7 +1063,7 @@ const stepGame = (dt) => {
   }
 
   if (run.state !== 'crashed') {
-    applyBalance();
+    applyBalance(grounded);
     applyGlide(dt, contacts);
   }
 
@@ -1105,6 +1182,9 @@ const updateHud = (dt) => {
   state.textContent = run.state;
   state.classList.toggle('crashed', run.state === 'crashed');
   el('posture-fill').style.height = Math.round(run.posture * 100) + '%';
+  el('posture').style.borderColor = Math.abs(run.lean) > 0.08
+    ? 'rgba(255, 209, 102, ' + (0.3 + Math.abs(run.lean) * 0.7).toFixed(2) + ')'
+    : 'var(--edge)';
   updateGrab();
   el('posture-mark').style.bottom = Math.round(CONFIG.pump.neutral * 100) + '%';
 };
@@ -1114,9 +1194,12 @@ const updateHud = (dt) => {
  * ------------------------------------------------------------------ */
 const beginPump = (clientX, clientY) => {
   pointerState.active = true;
+  pointerState.anchorX = clientX;
   pointerState.anchorY = clientY;
   pointerState.anchorPosture = run.posture;
+  pointerState.anchorLean = run.lean;
   pointerState.target = run.posture;
+  pointerState.leanTarget = run.lean;
   pointerState.x = clientX;
   pointerState.y = clientY;
   el('hint').classList.add('hidden');
@@ -1126,6 +1209,8 @@ const movePump = (clientX, clientY) => {
   if (!pointerState.active) return;
   const span = Math.max(80, window.innerHeight * CONFIG.pump.dragRange);
   pointerState.target = clamp(pointerState.anchorPosture + (pointerState.anchorY - clientY) / span, 0, 1);
+  const across = Math.max(60, window.innerWidth * CONFIG.lean.dragRange);
+  pointerState.leanTarget = clamp(pointerState.anchorLean + (clientX - pointerState.anchorX) / across, -1, 1);
   pointerState.x = clientX;
   pointerState.y = clientY;
 };
@@ -1136,11 +1221,19 @@ const updateGrab = () => {
   const grab = el('grab');
   grab.classList.toggle('on', pointerState.active);
   if (!pointerState.active) return;
-  const top = Math.min(pointerState.anchorY, pointerState.y) - 20;
-  const height = Math.abs(pointerState.anchorY - pointerState.y) + 40;
-  grab.style.transform = 'translate(' + pointerState.x + 'px, ' + top + 'px)';
-  grab.style.height = height + 'px';
-  el('grab-dot').style.top = (pointerState.y - top - 14) + 'px';
+  const anchor = el('grab-anchor');
+  anchor.style.left = pointerState.anchorX + 'px';
+  anchor.style.top = pointerState.anchorY + 'px';
+  const dot = el('grab-dot');
+  dot.style.left = pointerState.x + 'px';
+  dot.style.top = pointerState.y + 'px';
+  const dx = pointerState.x - pointerState.anchorX;
+  const dy = pointerState.y - pointerState.anchorY;
+  const link = el('grab-link');
+  link.style.left = pointerState.anchorX + 'px';
+  link.style.top = pointerState.anchorY + 'px';
+  link.style.width = Math.hypot(dx, dy) + 'px';
+  link.style.transform = 'rotate(' + Math.atan2(dy, dx) + 'rad)';
 };
 
 const wireInput = () => {
@@ -1161,27 +1254,35 @@ const wireInput = () => {
 
   /* Keyboard is a desktop convenience, so it drives the same axis by
    * ramping the target rather than snapping it. */
-  const keys = { up: false, down: false };
+  const keys = { up: false, down: false, back: false, fwd: false };
   const applyKeys = () => {
-    if (!keys.up && !keys.down) { pointerState.active = false; return; }
+    const any = keys.up || keys.down || keys.back || keys.fwd;
+    if (!any) { pointerState.active = false; return; }
     pointerState.active = true;
+    pointerState.anchorX = 0;
     pointerState.anchorY = 0;
     pointerState.anchorPosture = run.posture;
-    pointerState.target = keys.up ? 1 : 0;
+    pointerState.anchorLean = run.lean;
+    pointerState.target = keys.up ? 1 : keys.down ? 0 : run.posture;
+    pointerState.leanTarget = keys.fwd ? 1 : keys.back ? -1 : 0;
+  };
+  const keyFlag = (code, down) => {
+    if (code === 'ArrowUp' || code === 'KeyW' || code === 'Space') keys.up = down;
+    else if (code === 'ArrowDown' || code === 'KeyS') keys.down = down;
+    else if (code === 'ArrowLeft' || code === 'KeyA') keys.back = down;
+    else if (code === 'ArrowRight' || code === 'KeyD') keys.fwd = down;
+    else return false;
+    return true;
   };
   window.addEventListener('keydown', (ev) => {
     if (ev.repeat) return;
     if (ev.code === 'KeyR') { resetRun(false); return; }
-    if (ev.code === 'ArrowUp' || ev.code === 'KeyW' || ev.code === 'Space') keys.up = true;
-    else if (ev.code === 'ArrowDown' || ev.code === 'KeyS') keys.down = true;
-    else return;
+    if (!keyFlag(ev.code, true)) return;
     ev.preventDefault();
     applyKeys();
   });
   window.addEventListener('keyup', (ev) => {
-    if (ev.code === 'ArrowUp' || ev.code === 'KeyW' || ev.code === 'Space') keys.up = false;
-    else if (ev.code === 'ArrowDown' || ev.code === 'KeyS') keys.down = false;
-    else return;
+    if (!keyFlag(ev.code, false)) return;
     ev.preventDefault();
     applyKeys();
   });
@@ -1530,6 +1631,7 @@ const boot = () => {
 
   buildTerrain();
   run.posture = CONFIG.pump.neutral;
+  run.lean = 0;
   buildSkier();
   applyConfig();
   wireInput();
