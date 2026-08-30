@@ -198,6 +198,9 @@ const CONFIG = {
     limbMassScale: 1,
     torsoMassScale: 1,
     limpStiffness: 0.05,
+    stanceWidth: 0.12,
+    stanceStiffness: 250,
+    stanceDamping: 30,
     leanTorque: 60,
     airSpinTorque: 26,
     maxAngularSpeed: 34,
@@ -296,6 +299,9 @@ const PANEL_SPEC = [
       { path: 'ragdoll.limbMassScale', min: 0.25, max: 3, step: 0.05, rebuild: true },
       { path: 'ragdoll.torsoMassScale', min: 0.25, max: 3, step: 0.05, rebuild: true },
       { path: 'ragdoll.limpStiffness', min: 0, max: 0.5, step: 0.01 },
+      { path: 'ragdoll.stanceWidth', min: -0.2, max: 0.8, step: 0.01 },
+      { path: 'ragdoll.stanceStiffness', min: 0, max: 1200, step: 10 },
+      { path: 'ragdoll.stanceDamping', min: 0, max: 150, step: 1 },
       { path: 'ragdoll.leanTorque', min: 0, max: 400, step: 2 },
       { path: 'ragdoll.airSpinTorque', min: 0, max: 80, step: 0.5 },
       { path: 'ragdoll.maxAngularSpeed', min: 4, max: 120, step: 1 },
@@ -644,8 +650,13 @@ const JOINTS = [
   { name: 'elbowR', a: 'upperArmR', b: 'lowerArmR', pa: [0, -0.15, 0], pb: [0, 0.145, 0], axis: [0, -1, 0], cone: 1.6 },
   { name: 'hipL', a: 'pelvis', b: 'thighL', pa: [-0.11, -0.11, 0], pb: [0, 0.21, 0], axis: [0, -1, 0], cone: 1.3 },
   { name: 'hipR', a: 'pelvis', b: 'thighR', pa: [0.11, -0.11, 0], pb: [0, 0.21, 0], axis: [0, -1, 0], cone: 1.3 },
-  { name: 'kneeL', a: 'thighL', b: 'shinL', pa: [0, -0.21, 0], pb: [0, 0.22, 0], axis: [0, -1, 0], cone: 1.5 },
-  { name: 'kneeR', a: 'thighR', b: 'shinR', pa: [0, -0.21, 0], pb: [0, 0.22, 0], axis: [0, -1, 0], cone: 1.5 },
+  /* Knees are hinges, not cones. A cone cannot tell flexion from splay, so
+   * the 82-degree aperture the grab pose needs for FLEXION was also 82
+   * degrees of sideways travel — and the rig used it, parking both knees
+   * at +/-66 degrees after the first hard landing and skiing the rest of
+   * the run in the splits at a fifth of the speed. */
+  { name: 'kneeL', a: 'thighL', b: 'shinL', pa: [0, -0.21, 0], pb: [0, 0.22, 0], type: 'hinge', hinge: [1, 0, 0] },
+  { name: 'kneeR', a: 'thighR', b: 'shinR', pa: [0, -0.21, 0], pb: [0, 0.22, 0], type: 'hinge', hinge: [1, 0, 0] },
 ];
 
 /* Poses are Euler XYZ triples for the child's orientation in the parent's
@@ -783,14 +794,21 @@ const buildSkier = () => {
   const constraints = [];
   for (let i = 0; i < JOINTS.length; i++) {
     const j = JOINTS[i];
-    const c = new CANNON.ConeTwistConstraint(bodies[j.a], bodies[j.b], {
-      pivotA: new CANNON.Vec3(j.pa[0], j.pa[1], j.pa[2]),
-      pivotB: new CANNON.Vec3(j.pb[0], j.pb[1], j.pb[2]),
-      axisA: new CANNON.Vec3(j.axis[0], j.axis[1], j.axis[2]),
-      axisB: new CANNON.Vec3(j.axis[0], j.axis[1], j.axis[2]),
-      angle: j.cone * CONFIG.ragdoll.jointLimit,
-      twistAngle: CONFIG.ragdoll.twistLimit,
-    });
+    const c = j.type === 'hinge'
+      ? new CANNON.HingeConstraint(bodies[j.a], bodies[j.b], {
+          pivotA: new CANNON.Vec3(j.pa[0], j.pa[1], j.pa[2]),
+          pivotB: new CANNON.Vec3(j.pb[0], j.pb[1], j.pb[2]),
+          axisA: new CANNON.Vec3(j.hinge[0], j.hinge[1], j.hinge[2]),
+          axisB: new CANNON.Vec3(j.hinge[0], j.hinge[1], j.hinge[2]),
+        })
+      : new CANNON.ConeTwistConstraint(bodies[j.a], bodies[j.b], {
+          pivotA: new CANNON.Vec3(j.pa[0], j.pa[1], j.pa[2]),
+          pivotB: new CANNON.Vec3(j.pb[0], j.pb[1], j.pb[2]),
+          axisA: new CANNON.Vec3(j.axis[0], j.axis[1], j.axis[2]),
+          axisB: new CANNON.Vec3(j.axis[0], j.axis[1], j.axis[2]),
+          angle: j.cone * CONFIG.ragdoll.jointLimit,
+          twistAngle: CONFIG.ragdoll.twistLimit,
+        });
     c.collideConnected = false;
     world.addConstraint(c);
     constraints.push(c);
@@ -838,6 +856,11 @@ const tmpSide = new THREE.Vector3();
 const tmpUp = new THREE.Vector3();
 const tmpCross = new THREE.Vector3();
 const tmpVcm = new THREE.Vector3();
+const tmpStance = new CANNON.Vec3();
+const UNIT_RIGHT = new CANNON.Vec3(1, 0, 0);
+const UNIT_DOWN = new CANNON.Vec3(0, -1, 0);
+const UNIT_FWD = new CANNON.Vec3(0, 0, -1);
+const STANCE_LEGS = [{ name: 'thighL', side: -1 }, { name: 'thighR', side: 1 }];
 
 /** Torque = I * alpha, with I taken in the body's own frame. */
 const applyAngularAccel = (body, ax, ay, az, out) => {
@@ -863,16 +886,21 @@ const applyAngularAccel = (body, ax, ay, az, out) => {
  * the centre of mass, alpha x d, plus its own I*alpha of spin. Summed,
  * that is exactly I_com * alpha with zero net force — the rig turns as
  * one piece, the joints feel no stress, and nothing is pushed sideways.
+ *
+ * This used to hold the skis out of the rotation, on the theory that
+ * torquing a 1.7 m ski resting on the snow levers the leg and throws the
+ * rider. That was true while the knee was a cone and the leg could fold
+ * sideways under it. With a hinge knee the leg turns as one piece, and
+ * measuring it both ways is unambiguous: including the legs is worth
+ * 54 m against 22 m, half the crashes, and 3 m/s more speed.
  */
-const applyRigAccel = (ax, ay, az, includeSkis) => {
+const applyRigAccel = (ax, ay, az) => {
   let mass = 0;
   let comX = 0;
   let comY = 0;
   let comZ = 0;
   for (let i = 0; i < skier.order.length; i++) {
-    const name = skier.order[i];
-    if (!includeSkis && (name === 'shinL' || name === 'shinR')) continue;
-    const body = skier.bodies[name];
+    const body = skier.bodies[skier.order[i]];
     mass += body.mass;
     comX += body.position.x * body.mass;
     comY += body.position.y * body.mass;
@@ -884,9 +912,7 @@ const applyRigAccel = (ax, ay, az, includeSkis) => {
   comZ /= mass;
 
   for (let i = 0; i < skier.order.length; i++) {
-    const name = skier.order[i];
-    if (!includeSkis && (name === 'shinL' || name === 'shinR')) continue;
-    const body = skier.bodies[name];
+    const body = skier.bodies[skier.order[i]];
     const dx = body.position.x - comX;
     const dy = body.position.y - comY;
     const dz = body.position.z - comZ;
@@ -1039,7 +1065,7 @@ const applySkiForces = (dt, contacts) => {
   for (let i = 0; i < contacts.length; i++) {
     const body = contacts[i].body;
     const steerK = run.steer * CONFIG.ski.edgeSteer * clamp(speed / 6, 0, 1.6) / contacts.length;
-    applyRigAccel(nx * steerK, ny * steerK, nz * steerK, true);
+    applyRigAccel(nx * steerK, ny * steerK, nz * steerK);
   }
 
   /* edge grip and glide, as one delta-v shared by the whole rig */
@@ -1064,6 +1090,47 @@ const applySkiForces = (dt, contacts) => {
     const body = skier.bodies[skier.order[i]];
     tmpVec.set(dvx * body.mass, dvy * body.mass, dvz * body.mass);
     body.applyImpulse(tmpVec);
+  }
+};
+
+/**
+ * Adductors — the muscles that stop a skier doing the splits.
+ *
+ * The hip is a cone joint, and a cone cannot tell a deep tuck from the
+ * splits: the aperture the grab pose needs for flexion is the same
+ * aperture the leg can travel sideways. So stance width gets its own
+ * controller, holding each thigh at CONFIG.ragdoll.stanceWidth radians
+ * off the pelvis's centreline and resisting anything trying to pry the
+ * legs apart. Equal and opposite on the pelvis, so it is real muscle and
+ * not a hand from the sky.
+ */
+const holdStance = () => {
+  const pelvis = skier.bodies.pelvis;
+  pelvis.vectorToWorldFrame(UNIT_RIGHT, tmpStance);
+  const rx = tmpStance.x;
+  const ry = tmpStance.y;
+  const rz = tmpStance.z;
+  pelvis.vectorToWorldFrame(UNIT_FWD, tmpStance);
+  const fx = tmpStance.x;
+  const fy = tmpStance.y;
+  const fz = tmpStance.z;
+
+  for (let i = 0; i < STANCE_LEGS.length; i++) {
+    const thigh = skier.bodies[STANCE_LEGS[i].name];
+    thigh.vectorToWorldFrame(UNIT_DOWN, tmpStance);
+    const lateral = tmpStance.x * rx + tmpStance.y * ry + tmpStance.z * rz;
+    const error = Math.asin(clamp(lateral, -1, 1)) - STANCE_LEGS[i].side * CONFIG.ragdoll.stanceWidth;
+
+    thigh.angularVelocity.vsub(pelvis.angularVelocity, tmpStance);
+    const rollRate = tmpStance.x * fx + tmpStance.y * fy + tmpStance.z * fz;
+
+    const accel = error * CONFIG.ragdoll.stanceStiffness - rollRate * CONFIG.ragdoll.stanceDamping;
+    const it = inertiaAbout(thigh, fx, fy, fz);
+    const ip = inertiaAbout(pelvis, fx, fy, fz);
+    const reduced = (it * ip) / (it + ip + 1e-9);
+    tmpTorque.set(fx * accel * reduced, fy * accel * reduced, fz * accel * reduced);
+    thigh.torque.vadd(tmpTorque, thigh.torque);
+    pelvis.torque.vsub(tmpTorque, pelvis.torque);
   }
 };
 
@@ -1109,14 +1176,13 @@ const applyBalance = (dt, grounded, normal) => {
     applyRigAccel(
       tmpCross.x * k - pelvis.angularVelocity.x * d,
       tmpCross.y * k - pelvis.angularVelocity.y * d,
-      tmpCross.z * k - pelvis.angularVelocity.z * d,
-      false
+      tmpCross.z * k - pelvis.angularVelocity.z * d
     );
   } else if (Math.abs(run.steer) > 0.02) {
     /* airborne: the same two pads become flip authority */
     pelvis.vectorToWorldFrame(new CANNON.Vec3(1, 0, 0), tmpVec);
     const k = CONFIG.ragdoll.airSpinTorque * run.steer;
-    applyRigAccel(tmpVec.x * k, tmpVec.y * k, tmpVec.z * k, true);
+    applyRigAccel(tmpVec.x * k, tmpVec.y * k, tmpVec.z * k);
   }
 };
 
@@ -1253,6 +1319,7 @@ const stepGame = (dt) => {
 
   if (run.state !== 'crashed') {
     if (grounded) applySkiForces(dt, contacts);
+    holdStance();
     applyBalance(dt, grounded, tmpNormal);
     if (input.popQueued && grounded) {
       popJump(tmpNormal);
@@ -1621,6 +1688,7 @@ const applyConfig = () => {
 
   if (skier) {
     for (let i = 0; i < skier.constraints.length; i++) {
+      if (JOINTS[i].type === 'hinge') continue;
       skier.constraints[i].angle = JOINTS[i].cone * CONFIG.ragdoll.jointLimit;
       skier.constraints[i].twistAngle = CONFIG.ragdoll.twistLimit;
     }
