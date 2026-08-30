@@ -224,8 +224,8 @@ const CONFIG = {
   ski: {
     glideDrag: 0.22,
     contactTolerance: 0.16,
-    edgeSnap: 320,
-    snapDamping: 26,
+    ankleStiffness: 4000,
+    ankleDamping: 26,
   },
   pump: {
     neutral: 0.5,
@@ -243,7 +243,7 @@ const CONFIG = {
     response: 14,
     returnLag: 0.3,
     groundRange: 0.5,
-    airTorque: 13,
+    airTorque: 24,
     airDamping: 17,
     airLevel: 70,
     spinDrag: 2,
@@ -260,7 +260,7 @@ const CONFIG = {
     leanBias: 0,
     limpStiffness: 0.05,
     maxAngularSpeed: 34,
-    maxJointTorque: 700,
+    maxJointTorque: 2500,
   },
   /* The two ends of the single control axis. Everything the player does
    * is a blend between these two postures — there is no jump button, so
@@ -301,7 +301,7 @@ const PANEL_SPEC = [
       { path: 'pump.dragRange', min: 0.03, max: 1, step: 0.01, key: true,
         label: 'slide distance', hint: 'how far your thumb travels for a full crouch-to-stand' },
       { path: 'pump.maxRate', min: 0.5, max: 30, step: 0.5, key: true,
-        label: 'pop speed', hint: 'how fast the legs may unfold. Higher = snappier pop, to a point' },
+        label: 'extension speed', hint: 'how fast the legs may unfold. Sets the timing of a pop, not its height — leg strength does that' },
       { path: 'pump.neutral', min: 0, max: 1, step: 0.01, key: true,
         label: 'resting stance', hint: 'how bent the skier stands when you are not touching' },
       { path: 'pump.releaseLag', min: 0.02, max: 2, step: 0.02,
@@ -364,15 +364,18 @@ const PANEL_SPEC = [
       { path: 'ragdoll.balanceStiffness', min: 0, max: 900, step: 5 },
       { path: 'ragdoll.balanceDamping', min: 0, max: 250, step: 1 },
       { path: 'ragdoll.leanBias', min: -0.8, max: 0.8, step: 0.01 },
+      { path: 'ragdoll.maxJointTorque', min: 20, max: 8000, step: 10, key: true,
+        label: 'leg strength', hint: 'the hardest push the muscles are allowed. This, not pop speed, is what sets how high you get' },
     ],
   },
   {
     title: 'Skis',
     params: [
-      { path: 'ski.glideDrag', min: 0, max: 2, step: 0.01 },
-      { path: 'ski.contactTolerance', min: 0.02, max: 0.6, step: 0.01 },
-      { path: 'ski.edgeSnap', min: 0, max: 6000, step: 20 },
-      { path: 'ski.snapDamping', min: 0, max: 300, step: 1 },
+      { path: 'ski.ankleStiffness', min: 0, max: 12000, step: 50, key: true,
+        label: 'ankle stiffness', hint: 'how much of the leg drive reaches the snow. Too soft and the ankle folds, the ski tips up and the pop goes nowhere' },
+      { path: 'ski.glideDrag', min: 0, max: 2, step: 0.01, label: 'snow drag' },
+      { path: 'ski.contactTolerance', min: 0.02, max: 0.6, step: 0.01, label: 'contact reach' },
+      { path: 'ski.ankleDamping', min: 0, max: 300, step: 1, label: 'ankle damping' },
     ],
   },
   {
@@ -446,7 +449,6 @@ const PANEL_SPEC = [
       { path: 'physics.contactRelaxation', min: 1, max: 10, step: 0.5 },
       { path: 'ragdoll.limpStiffness', min: 0, max: 0.5, step: 0.01 },
       { path: 'ragdoll.maxAngularSpeed', min: 4, max: 120, step: 1 },
-      { path: 'ragdoll.maxJointTorque', min: 20, max: 4000, step: 10 },
       { path: 'terrain.elementSize', min: 0.5, max: 4, step: 0.25, rebuild: true },
       { path: 'terrain.width', min: 8, max: 60, step: 2, rebuild: true },
       { path: 'terrain.seed', min: 1, max: 99999999, step: 1, rebuild: true },
@@ -1006,14 +1008,22 @@ const updatePosture = (dt) => {
 
 const skiGrounded = (ski) => (ski.position.y - 0.02) - heightAt(ski.position.z) < CONFIG.ski.contactTolerance;
 
-/* The ankle is a plain, deliberately soft muscle. An earlier version
- * servoed the ski flat to the surface by putting the shin's own pitch
- * inside the ankle's target — a world-space goal wired up as a relative
- * joint drive, which is a positive feedback loop. Being stiffer than the
- * muscles, it won: its reaction torque cranked the shin round and folded
- * the knee from -40 to -166 degrees inside half a second, every run.
- * A 1.7 m ski lying on a heightfield flattens itself through contact;
- * it does not need a servo, it needs an ankle that gives. */
+/* The ankle is a plain muscle — no servo. An earlier version flattened
+ * the ski to the surface by putting the shin's own pitch inside the
+ * ankle's target, a world-space goal wired up as a relative joint drive,
+ * which is a positive feedback loop: being stiffer than the muscles it
+ * won, and its reaction torque folded the knee from -40 to -166 degrees
+ * inside half a second, every run. A 1.7 m ski on a heightfield flattens
+ * itself through contact and does not need a servo.
+ *
+ * It does, however, need to be STIFF, which the fix got wrong for a long
+ * time by overcorrecting to 320 against muscles at 20000. The ankle is
+ * the only path from the legs to the snow: at 320 a pop extended the legs
+ * and the ankle simply folded, tipping the ski up instead of driving it
+ * down. The measurement was unambiguous — the skis rose 0.32 m while the
+ * centre of mass gained exactly 0.00 m/s. The rider was tucking, not
+ * jumping, which is why no amount of pop speed or low gravity produced
+ * air. Stiff enough to transmit, soft enough not to servo. */
 
 const applyGlide = (dt, contacts) => {
   if (contacts === 0) return;
@@ -1087,7 +1097,7 @@ const stepGame = (dt) => {
     const child = skier.bodies[j.b];
     if (j.posture === 'ankle') {
       driveJoint(parent, child, jointTarget(j),
-        CONFIG.ski.edgeSnap * limp, CONFIG.ski.snapDamping * limp);
+        CONFIG.ski.ankleStiffness * limp, CONFIG.ski.ankleDamping * limp);
     } else if (j.loose === true) {
       driveJoint(parent, child, jointTarget(j),
         CONFIG.ragdoll.headStiffness * limp, CONFIG.ragdoll.headDamping * limp);
@@ -1177,13 +1187,30 @@ const cameraSideDistance = () => {
   return (CONFIG.camera.framing * 0.5) / Math.max(0.05, Math.tan(hFov / 2));
 };
 
+/* The debug panel sits over the bottom of the screen, so the middle of
+ * the window is not the middle of what you can actually see. Framing the
+ * skier to the centre of the window therefore parks them behind the
+ * sliders — which is useless, because the panel exists to be watched
+ * while you drag. Aiming below the skier by half the covered height
+ * lifts them into the clear part of the frame instead, and the shot goes
+ * back to normal the moment the panel is hidden. */
+const obscuredFraction = () => {
+  const panel = document.getElementById('debug');
+  if (!panel || panel.classList.contains('collapsed')) return 0;
+  const h = panel.getBoundingClientRect().height;
+  if (!(h > 0)) return 0;
+  return Math.min(0.5, h / Math.max(1, window.innerHeight));
+};
+
 const updateCamera = (dt) => {
   const p = skier.bodies.pelvis.position;
-  const focusY = p.y + 0.45;
+  /* World height the frame spans at the subject, from the vertical FOV. */
+  const visibleH = 2 * cameraSideDistance() * Math.tan(CONFIG.camera.fov * Math.PI / 360);
+  const focusY = p.y + 0.45 - obscuredFraction() * visibleH * 0.5;
   const focusZ = p.z - CONFIG.camera.lookAhead;
 
   const desiredX = cameraSideDistance();
-  const desiredY = focusY + CONFIG.camera.height;
+  const desiredY = p.y + 0.45 + CONFIG.camera.height;
   const desiredZ = focusZ + CONFIG.camera.distance;
 
   if (!camState.ready) {
