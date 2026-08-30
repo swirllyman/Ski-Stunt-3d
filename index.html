@@ -231,6 +231,7 @@ const CONFIG = {
     neutral: 0.5,
     dragRange: 0.16,
     maxRate: 10,
+    legDrive: 6,
     response: 30,
     releaseLag: 0.35,
   },
@@ -243,14 +244,14 @@ const CONFIG = {
     response: 14,
     returnLag: 0.3,
     groundRange: 0.5,
-    airTorque: 24,
+    airTorque: 60,
     airDamping: 17,
     airLevel: 70,
-    spinDrag: 2,
+    spinDrag: 4,
   },
   ragdoll: {
-    muscleStiffness: 20000,
-    muscleDamping: 283,
+    muscleStiffness: 6000,
+    muscleDamping: 155,
     limbMassScale: 1,
     torsoMassScale: 1,
     headStiffness: 90,
@@ -302,6 +303,8 @@ const PANEL_SPEC = [
     params: [
       { path: 'pump.dragRange', min: 0.03, max: 1, step: 0.01, key: true,
         label: 'slide distance', hint: 'how far your thumb travels for a full crouch-to-stand' },
+      { path: 'pump.legDrive', min: 0, max: 12, step: 0.1, key: true,
+        label: 'pop strength', hint: 'how much speed a full crouch-to-stand puts into the jump. The stroke has to be fast and it only counts on the snow' },
       { path: 'pump.maxRate', min: 0.5, max: 30, step: 0.5, key: true,
         label: 'extension speed', hint: 'how fast the legs may unfold. Sets the timing of a pop, not its height — leg strength does that' },
       { path: 'pump.neutral', min: 0, max: 1, step: 0.01, key: true,
@@ -316,7 +319,7 @@ const PANEL_SPEC = [
     params: [
       { path: 'lean.dragRange', min: 0.03, max: 1, step: 0.01, key: true,
         label: 'lean distance', hint: 'how far your thumb travels sideways for a full lean' },
-      { path: 'lean.airTorque', min: 0, max: 60, step: 0.5, key: true,
+      { path: 'lean.airTorque', min: 0, max: 240, step: 1, key: true,
         label: 'air rotation', hint: 'how hard sideways spins you in the air. This is your flip control' },
       { path: 'lean.groundRange', min: 0, max: 1.4, step: 0.02, key: true,
         label: 'weight shift', hint: 'how far forward/back you can throw your weight on the snow' },
@@ -536,6 +539,7 @@ window.__ski = probe;
 const run = {
   state: 'ready',
   posture: 0.45,
+  prevPosture: 0.45,
   lean: 0,
   distance: 0,
   momentum: 0,
@@ -915,12 +919,32 @@ const pitchOf = (body) => {
   return Math.atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y));
 };
 
-const driveJoint = (parent, child, targetAngle, stiffness, damping) => {
+/* Explicit damping is only stable while damping * dt stays well under 2,
+ * and the muscles were sitting at 1.18 — critical damping for a stiffness
+ * of 20000 is 283, which this timestep cannot integrate. The result was
+ * not a slightly soft muscle but a rig that rang: the pelvis flipped
+ * between +124 and -198 rad/s from one step to the next, past a clamp set
+ * at 34. That ringing was doing the "jumping" — turning damping down to a
+ * stable value removed the chatter and the liftoff with it, because the
+ * pop was the explosion.
+ *
+ * Rather than detune every gain to suit the step, bound the damping
+ * impulse by the one that exactly stops the relative motion this step.
+ * Below that bound this is ordinary viscous damping; above it, damping
+ * can only ever arrest the joint, never reverse it and fling it the other
+ * way. That makes any damping value stable at any step, so the muscles
+ * can stay critically damped and still be smooth. */
+const dampedAccel = (error, rate, stiffness, damping, dt) => {
+  const limit = Math.abs(rate) / Math.max(dt, 1e-6);
+  return error * stiffness - clamp(rate * damping, -limit, limit);
+};
+
+const driveJoint = (parent, child, targetAngle, stiffness, damping, dt) => {
   let error = targetAngle - (pitchOf(child) - pitchOf(parent));
   while (error > Math.PI) error -= Math.PI * 2;
   while (error < -Math.PI) error += Math.PI * 2;
   const rate = child.angularVelocity.x - parent.angularVelocity.x;
-  const accel = error * stiffness - rate * damping;
+  const accel = dampedAccel(error, rate, stiffness, damping, dt);
 
   const ic = inertiaAbout(child, 1, 0, 0);
   const ip = inertiaAbout(parent, 1, 0, 0);
@@ -941,7 +965,7 @@ const driveJoint = (parent, child, targetAngle, stiffness, damping) => {
  * from one another. Driving the difference to zero (rather than welding
  * both to a shared angle) keeps every existing muscle and contact intact,
  * so the rig can still absorb a one-ski landing. */
-const applyMirror = (scale) => {
+const applyMirror = (scale, dt) => {
   const stiffness = CONFIG.ragdoll.mirrorStiffness * scale;
   const damping = CONFIG.ragdoll.mirrorDamping * scale;
   if (stiffness <= 0 && damping <= 0) return;
@@ -957,7 +981,7 @@ const applyMirror = (scale) => {
     while (error < -Math.PI) error += Math.PI * 2;
     const rate = (right.angularVelocity.x - rightParent.angularVelocity.x) -
       (left.angularVelocity.x - leftParent.angularVelocity.x);
-    const accel = error * stiffness - rate * damping;
+    const accel = dampedAccel(error, rate, stiffness, damping, dt);
 
     const il = inertiaAbout(left, 1, 0, 0);
     const ir = inertiaAbout(right, 1, 0, 0);
@@ -966,21 +990,6 @@ const applyMirror = (scale) => {
     /* Equal and opposite across the pair, so the rig gains no net spin. */
     left.torque.vadd(tmpTorque, left.torque);
     right.torque.vsub(tmpTorque, right.torque);
-  }
-};
-
-const driveMuscles = (stiffnessScale) => {
-  updatePostureTargets();
-  for (let i = 0; i < JOINTS.length; i++) {
-    const j = JOINTS[i];
-    const loose = j.loose === true;
-    driveJoint(
-      skier.bodies[j.a],
-      skier.bodies[j.b],
-      jointTarget(j),
-      (loose ? CONFIG.ragdoll.headStiffness : CONFIG.ragdoll.muscleStiffness) * stiffnessScale,
-      (loose ? CONFIG.ragdoll.headDamping : CONFIG.ragdoll.muscleDamping) * stiffnessScale
-    );
   }
 };
 
@@ -1024,7 +1033,7 @@ const applyRigAccel = (accelX) => {
   }
 };
 
-const applyBalance = (grounded) => {
+const applyBalance = (grounded, dt) => {
   const pelvis = skier.bodies.pelvis;
 
   if (!grounded) {
@@ -1045,10 +1054,11 @@ const applyBalance = (grounded) => {
     while (drift > Math.PI) drift -= Math.PI * 2;
     while (drift < -Math.PI) drift += Math.PI * 2;
     const settle = 1 - Math.abs(run.lean);
+    const spin = pelvis.angularVelocity.x;
     applyRigAccel(run.lean * CONFIG.lean.airTorque +
-      (drift * CONFIG.lean.airLevel -
-        pelvis.angularVelocity.x * CONFIG.lean.airDamping) * settle -
-      pelvis.angularVelocity.x * CONFIG.lean.spinDrag);
+      dampedAccel(drift, spin, CONFIG.lean.airLevel, CONFIG.lean.airDamping, dt) * settle -
+      clamp(spin * CONFIG.lean.spinDrag, -Math.abs(spin) / Math.max(dt, 1e-6),
+        Math.abs(spin) / Math.max(dt, 1e-6)));
     return;
   }
 
@@ -1060,8 +1070,8 @@ const applyBalance = (grounded) => {
   let error = target - pitchOf(pelvis);
   while (error > Math.PI) error -= Math.PI * 2;
   while (error < -Math.PI) error += Math.PI * 2;
-  applyRigAccel(error * CONFIG.ragdoll.balanceStiffness -
-    pelvis.angularVelocity.x * CONFIG.ragdoll.balanceDamping);
+  applyRigAccel(dampedAccel(error, pelvis.angularVelocity.x,
+    CONFIG.ragdoll.balanceStiffness, CONFIG.ragdoll.balanceDamping, dt));
 };
 
 /* ------------------------------------------------------------------ *
@@ -1084,6 +1094,43 @@ const updatePosture = (dt) => {
   const leanTo = pointerState.active ? pointerState.leanTarget : 0;
   const leanLag = pointerState.active ? 1 / Math.max(1, CONFIG.lean.response) : CONFIG.lean.returnLag;
   run.lean = clamp(damp(run.lean, leanTo, leanLag, dt), -1, 1);
+};
+
+/* The pop, as an actual push rather than a side effect.
+ *
+ * Extending the legs against a stiff contact ought to launch the rider,
+ * and on paper the torque budget is there. In practice the push leaked
+ * away through a compliance chain — ankle, knee, hip, spine, each one a
+ * soft PD — and what reached the snow was not a jump at all. What
+ * launched the rider instead was the solver ringing: at half the timestep
+ * the chatter vanished and so did every centimetre of air.
+ *
+ * So the drive is explicit. It is still a pump and not a jump button:
+ * the force exists only while a ski is on the snow, and it is
+ * proportional to how fast the posture is opening, so the impulse over a
+ * whole stroke works out as legDrive times the range actually used. Half
+ * a crouch gives half a pop; standing already tall gives nothing, because
+ * there is no range left to open. Timing it against the terrain is still
+ * the whole skill, and it is smooth by construction, because the posture
+ * it differentiates is itself rate-limited and eased.
+ *
+ * Applied along the surface normal, mass-proportional, so it accelerates
+ * the whole rig evenly and adds no spurious spin. */
+const applyLegDrive = (dt, grounded) => {
+  const rate = (run.posture - run.prevPosture) / Math.max(dt, 1e-6);
+  run.prevPosture = run.posture;
+  if (!grounded || rate <= 0 || run.state === 'crashed') return;
+
+  const accel = Math.min(rate, CONFIG.pump.maxRate) * CONFIG.pump.legDrive;
+  const z = skier.bodies.pelvis.position.z;
+  const step = 0.5;
+  const slope = (heightAt(z + step) - heightAt(z - step)) / (2 * step);
+  const inv = 1 / Math.sqrt(1 + slope * slope);
+  for (let i = 0; i < skier.order.length; i++) {
+    const body = skier.bodies[skier.order[i]];
+    tmpVec.set(0, accel * inv * body.mass, -accel * slope * inv * body.mass);
+    body.force.vadd(tmpVec, body.force);
+  }
 };
 
 const skiGrounded = (ski) => (ski.position.y - 0.02) - heightAt(ski.position.z) < CONFIG.ski.contactTolerance;
@@ -1130,6 +1177,7 @@ const resetRun = (rebuildWorld) => {
     buildTerrain();
   }
   run.posture = CONFIG.pump.neutral;
+  run.prevPosture = CONFIG.pump.neutral;
   run.lean = 0;
   buildSkier();
   run.state = 'ready';
@@ -1177,20 +1225,21 @@ const stepGame = (dt) => {
     const child = skier.bodies[j.b];
     if (j.posture === 'ankle') {
       driveJoint(parent, child, jointTarget(j),
-        CONFIG.ski.ankleStiffness * limp, CONFIG.ski.ankleDamping * limp);
+        CONFIG.ski.ankleStiffness * limp, CONFIG.ski.ankleDamping * limp, dt);
     } else if (j.loose === true) {
       driveJoint(parent, child, jointTarget(j),
-        CONFIG.ragdoll.headStiffness * limp, CONFIG.ragdoll.headDamping * limp);
+        CONFIG.ragdoll.headStiffness * limp, CONFIG.ragdoll.headDamping * limp, dt);
     } else {
       driveJoint(parent, child, jointTarget(j),
-        CONFIG.ragdoll.muscleStiffness * limp, CONFIG.ragdoll.muscleDamping * limp);
+        CONFIG.ragdoll.muscleStiffness * limp, CONFIG.ragdoll.muscleDamping * limp, dt);
     }
   }
 
-  applyMirror(limp);
+  applyMirror(limp, dt);
+  applyLegDrive(dt, grounded);
 
   if (run.state !== 'crashed') {
-    applyBalance(grounded);
+    applyBalance(grounded, dt);
     applyGlide(dt, contacts);
   }
 
@@ -1810,6 +1859,7 @@ const boot = () => {
 
   buildTerrain();
   run.posture = CONFIG.pump.neutral;
+  run.prevPosture = CONFIG.pump.neutral;
   run.lean = 0;
   buildSkier();
   applyConfig();
