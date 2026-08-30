@@ -34,19 +34,25 @@ Phase 1 of this spec is built: the planar architecture, the rig, and the single 
 
 Joints are **point-to-point, not hinges**. In the plane, `angularFactor` already forbids every rotation but X, so a hinge's two rotational equations have nothing to do — and the solver's response to them is masked, so they never converge, burn every iteration, and starve the contact equations they share a solver with. That made the rig collapse where it stood and then detonate at 7 km/s when the muscles were stiffened. A pivot plus the plane lock *is* a hinge about X.
 
-### The pump does not work yet
+### The pump: pop works, sustained momentum is unproven
 
-This is the headline and it is not good news. An autopilot that pumps correctly — extending through compressions, crouching over crests — is measurably **worse** than one that pumps backwards:
+The control is a **continuous analog stroke**, not a held button. Touching down anchors the axis wherever the finger lands, so a stroke never jumps; from then on posture tracks the finger, and how fast you slide is how hard the skier extends.
 
-| autopilot | peak speed over 22 s |
-|---|---|
-| no input at all | 11.9 m/s |
-| pumping correctly | 13.5 m/s |
-| pumping deliberately wrong | 15.3 m/s |
+Measured by scripting strokes of different durations from the same loaded crouch:
 
-If the mechanic worked, correct pumping would win by a clear margin and doing nothing would lose. Instead all three sit within 30% of each other, which says posture barely couples into speed at all: gravity down a 0.32 rad slope swamps whatever work the extension is doing. The likely cause is that a posture change mostly rearranges limbs rather than moving the centre of mass relative to the skis, so there is very little work to do against the contact in the first place.
+| stroke | peak ski clearance | air |
+|---|---|---|
+| 0.05 s | 0.06 m | — |
+| **0.12 s** | **0.41 m** | **0.47 s** |
+| 0.25 s | 0.13 m | — |
+| 0.5 s | 0.13 m | — |
+| 1.0 s | 0.13 m | — |
 
-Section 1 says jumping is an emergent result of timing extension against terrain. Until that table inverts, it is not emergent — it is absent. **This is the next thing to fix and nothing else in the spec matters until it is.**
+So pop is analog and controllable, with a clear optimum: a well-timed stroke jumps three times as high as a lazy shove. That is a real skill to learn, and it is the mechanic section 1 asks for.
+
+`pump.maxRate` turns out to be the mechanism rather than a safety limit, which was not obvious. Raising it from 6 to 14 destroys the jump entirely — every stroke flattens to 0.13 m. Capping the rate is what shapes the extension into something the legs can push the ground with; uncapped, the muscles snap through the pose without doing work on the snow. Do not "optimise" it upward.
+
+**Still unproven:** whether pumping *chains* — whether repeated well-timed strokes over the rollers build speed the way a skateboarder pumps a bowl. Pop over one compression works; sustained momentum gain across many has not been measured since the control scheme changed. That is the next measurement, and section 6's whole momentum design rests on it.
 
 ### What the tuning cost
 
