@@ -86,6 +86,27 @@
     position: absolute; height: 2px; transform-origin: 0 50%;
     background: linear-gradient(90deg, rgba(94,200,255,0.15), rgba(94,200,255,0.75));
   }
+  /* The scoreboard. Centred and modal-ish, because the run is over and
+   * there is nothing behind it worth reading past. */
+  #score {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -46%) scale(0.96);
+    width: min(340px, calc(100vw - 32px)); padding: 18px 18px 14px;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 18px;
+    backdrop-filter: blur(10px); text-align: center; z-index: 40;
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  #score.show { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  #score .head { font-size: 12px; font-weight: 700; letter-spacing: 2px; color: var(--accent); }
+  #score .cards { display: flex; gap: 8px; margin: 14px 0 12px; }
+  #score .judge {
+    flex: 1; padding: 12px 4px 8px; border-radius: 12px;
+    background: rgba(150,190,240,0.08); border: 1px solid var(--edge);
+  }
+  #score .judge .num { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  #score .judge .who { margin-top: 5px; font-size: 9px; letter-spacing: 1.2px; opacity: 0.6; font-weight: 700; }
+  #score .total { font-size: 17px; font-weight: 800; letter-spacing: 0.5px; }
+  #score .detail { margin-top: 5px; font-size: 11px; opacity: 0.6; line-height: 1.4; }
+  #score button { margin-top: 14px; width: 100%; padding: 11px; font-size: 12px; }
   #btn-reset {
     position: fixed; right: 10px; top: calc(10px + var(--safe-t));
     padding: 9px 13px; border-radius: 12px; background: var(--panel);
@@ -185,6 +206,14 @@
 <button id="btn-reset">RESET</button>
 <div id="toast"></div>
 
+<div id="score">
+  <div class="head">FINISH</div>
+  <div class="cards" id="score-cards"></div>
+  <div class="total" id="score-total">0.0 / 30</div>
+  <div class="detail" id="score-detail"></div>
+  <button id="score-again">RUN IT AGAIN</button>
+</div>
+
 <div id="hint">touch anywhere &middot; &#8597; pump &middot; &#8596; lean</div>
 <div id="grab"><div class="anchor" id="grab-anchor"></div><div class="link" id="grab-link"></div><div class="dot" id="grab-dot"></div></div>
 
@@ -277,18 +306,41 @@ const CONFIG = {
    * skier with no propulsion simply stops in one. That is what happened:
    * 2*pi*1.4/26 + 2*pi*0.35/9 = 0.58 against a hill of 0.33. Keep the sum
    * under about 0.8 of tan(slopeAngle) until the pump can climb. */
+  /* The template level. One run-in, one obstacle, one landing, one gate:
+   * everything a later generator needs to place is a number here. */
+  level: {
+    approach: 96,
+    jumpHeight: 2.6,
+    jumpLength: 12,
+    landingDrop: 2.2,
+    landingLength: 30,
+    finishAt: 200,
+  },
+  judges: {
+    airFor10: 2.6,
+    flipsFor10: 1.5,
+    cleanAngle: 30,
+    stumbleAngle: 60,
+    spread: 0.9,
+    crashPenalty: 4.5,
+  },
+  blood: {
+    particles: 110,
+    hardImpact: 16,
+    spray: 7,
+    gravity: 20,
+    stainSize: 0.55,
+    maxStains: 500,
+  },
   terrain: {
     slopeAngle: 0.32,
-    length: 420,
+    length: 264,
     width: 60,
     elementSize: 1.5,
     rollerAmp: 0.7,
     rollerLength: 26,
     chopAmp: 0.1,
     chopLength: 9,
-    lipAt: 150,
-    lipHeight: 2.2,
-    lipLength: 9,
     seed: 20260830,
   },
   world: { fogDensity: 0.008, sunElevation: 0.9, ambientLevel: 2.2 },
@@ -410,15 +462,53 @@ const PANEL_SPEC = [
     ],
   },
   {
+    title: 'Level',
+    params: [
+      { path: 'level.jumpHeight', min: 0, max: 8, step: 0.1, rebuild: true, key: true,
+        label: 'jump height', hint: 'how big the kicker is. The one obstacle this level is built around' },
+      { path: 'level.approach', min: 20, max: 400, step: 2, rebuild: true,
+        label: 'run-in length', hint: 'how far you get to build speed before the takeoff' },
+      { path: 'level.jumpLength', min: 3, max: 40, step: 0.5, rebuild: true, label: 'ramp length' },
+      { path: 'level.landingDrop', min: 0, max: 8, step: 0.1, rebuild: true, key: true,
+        label: 'landing drop', hint: 'how far the hill falls away past the lip. This is what buys you airtime' },
+      { path: 'level.landingLength', min: 6, max: 90, step: 1, rebuild: true, label: 'landing length' },
+      { path: 'level.finishAt', min: 40, max: 600, step: 5, rebuild: true, key: true,
+        label: 'finish line', hint: 'where the gate stands. Cross it upright and the judges score you' },
+    ],
+  },
+  {
+    title: 'Judges',
+    params: [
+      { path: 'judges.airFor10', min: 0.4, max: 8, step: 0.1, key: true,
+        label: 'airtime for a 10', hint: 'the longest single flight that earns full marks for air' },
+      { path: 'judges.flipsFor10', min: 0.25, max: 5, step: 0.05, key: true,
+        label: 'rotations for a 10', hint: 'how many full flips earn full marks' },
+      { path: 'judges.cleanAngle', min: 5, max: 90, step: 1, label: 'clean landing (deg)' },
+      { path: 'judges.stumbleAngle', min: 10, max: 170, step: 1, label: 'stumble limit (deg)' },
+      { path: 'judges.crashPenalty', min: 0, max: 10, step: 0.5, label: 'wipeout penalty' },
+      { path: 'judges.spread', min: 0, max: 3, step: 0.05, label: 'judge disagreement' },
+    ],
+  },
+  {
+    title: 'Blood',
+    params: [
+      { path: 'blood.particles', min: 0, max: 400, step: 5, key: true,
+        label: 'spray amount', hint: 'droplets at a maximal wipeout. A gentle slide throws far fewer' },
+      { path: 'blood.hardImpact', min: 2, max: 40, step: 0.5,
+        label: 'worst-case speed', hint: 'the impact speed treated as a 10 out of 10 wipeout' },
+      { path: 'blood.spray', min: 0, max: 30, step: 0.5, label: 'spray speed' },
+      { path: 'blood.gravity', min: 1, max: 60, step: 1, label: 'droplet gravity' },
+      { path: 'blood.stainSize', min: 0.05, max: 2, step: 0.05, label: 'stain size' },
+      { path: 'blood.maxStains', min: 20, max: 2000, step: 20, label: 'stain limit' },
+    ],
+  },
+  {
     title: 'Terrain',
     params: [
       { path: 'terrain.slopeAngle', min: 0.02, max: 0.7, step: 0.01, rebuild: true, key: true,
         label: 'hill steepness', hint: 'rollers must stay gentler than this or the run stalls' },
       { path: 'terrain.rollerAmp', min: 0, max: 5, step: 0.05, rebuild: true, label: 'roller height' },
       { path: 'terrain.rollerLength', min: 6, max: 90, step: 1, rebuild: true, label: 'roller spacing' },
-      { path: 'terrain.lipHeight', min: 0, max: 8, step: 0.1, rebuild: true, label: 'lip height' },
-      { path: 'terrain.lipLength', min: 2, max: 40, step: 0.5, rebuild: true, label: 'lip length' },
-      { path: 'terrain.lipAt', min: 20, max: 600, step: 5, rebuild: true, label: 'lip position' },
       { path: 'terrain.chopAmp', min: 0, max: 2, step: 0.05, rebuild: true, label: 'chatter height' },
       { path: 'terrain.chopLength', min: 3, max: 40, step: 0.5, rebuild: true, label: 'chatter spacing' },
       { path: 'terrain.length', min: 80, max: 900, step: 20, rebuild: true, label: 'run length' },
@@ -548,6 +638,19 @@ const run = {
   crashTimer: 0,
   groundedFor: 0,
   airborneFor: 0,
+  /* What the judges actually score. Gathered per flight rather than as
+   * running totals, because "best jump" and "did you land it" are the
+   * questions, not "how long were you off the ground overall". */
+  bestAir: 0,
+  flips: 0,
+  flightTurn: 0,
+  flightPitch: 0,
+  landings: 0,
+  cleanLandings: 0,
+  worstLanding: 0,
+  crashes: 0,
+  finishTimer: 0,
+  scored: null,
 };
 
 /* ------------------------------------------------------------------ *
@@ -560,14 +663,30 @@ const heightAt = (z) => {
   const t = terrain;
   const d = -z;
   let h = z * Math.tan(CONFIG.terrain.slopeAngle);
-  const fade = clamp(d / 18, 0, 1);
+  /* Rollers are the pump substrate, but they belong on the run-in only:
+   * chop through the takeoff or the landing turns the level's one
+   * obstacle into a lottery. */
+  const fade = clamp(d / 18, 0, 1) * clamp((CONFIG.level.approach - 6 - d) / 16, 0, 1);
   h += CONFIG.terrain.rollerAmp * fade *
     Math.sin((d / CONFIG.terrain.rollerLength) * Math.PI * 2 + t.phaseA);
   h += CONFIG.terrain.chopAmp * fade *
     Math.sin((d / CONFIG.terrain.chopLength) * Math.PI * 2 + t.phaseB);
 
-  const u = (d - CONFIG.terrain.lipAt) / CONFIG.terrain.lipLength;
-  if (u > 0 && u < 1) h += CONFIG.terrain.lipHeight * u * u;
+  /* The obstacle. A kicker ramps up to the lip, and past the lip the hill
+   * ramps back down and keeps going into a trough — the drop is what buys
+   * the airtime, since a jump you launch off flat ground gives you only
+   * what your legs put in. The down-ramp starts at exactly the lip height
+   * so the surface stays continuous; a step here would be a wall for the
+   * heightfield to catch a ski on. */
+  const lip = CONFIG.level.approach + CONFIG.level.jumpLength;
+  if (d > CONFIG.level.approach && d <= lip) {
+    const u = (d - CONFIG.level.approach) / CONFIG.level.jumpLength;
+    h += CONFIG.level.jumpHeight * u * u;
+  } else if (d > lip) {
+    const u = clamp((d - lip) / CONFIG.level.landingLength, 0, 1);
+    h += CONFIG.level.jumpHeight * (1 - u) * (1 - u) -
+      CONFIG.level.landingDrop * Math.sin(u * Math.PI);
+  }
   return h;
 };
 
@@ -641,6 +760,41 @@ const buildTerrain = () => {
   mesh.receiveShadow = true;
   scene.add(mesh);
   terrain.mesh = mesh;
+
+  buildGate();
+};
+
+/* The finish gate. Purely visual — crossing it is a distance test, not a
+ * collision — but it has to be visible from the run-in, because a level
+ * you are meant to read before you start needs its end drawn on it. */
+const buildGate = () => {
+  const group = new THREE.Group();
+  const z = -CONFIG.level.finishAt;
+  const y = heightAt(z);
+  const span = 7;
+  const postGeo = new THREE.CylinderGeometry(0.16, 0.16, 4.2, 8);
+  const postMat = new THREE.MeshLambertMaterial({ color: 0xd8443a });
+  for (let i = 0; i < 2; i++) {
+    const post = new THREE.Mesh(postGeo, postMat);
+    post.position.set(i === 0 ? -span : span, y + 2.1, z);
+    group.add(post);
+  }
+  const banner = new THREE.Mesh(
+    new THREE.PlaneGeometry(span * 2, 1.1),
+    new THREE.MeshLambertMaterial({ color: 0xd8443a, side: THREE.DoubleSide })
+  );
+  banner.position.set(0, y + 3.8, z);
+  group.add(banner);
+  /* A stripe painted across the snow, so the line reads from above too. */
+  const paint = new THREE.Mesh(
+    new THREE.PlaneGeometry(span * 2, 1.4),
+    new THREE.MeshBasicMaterial({ color: 0xd8443a, transparent: true, opacity: 0.75 })
+  );
+  paint.rotation.x = -Math.PI / 2;
+  paint.position.set(0, y + 0.04, z);
+  group.add(paint);
+  scene.add(group);
+  terrain.gate = group;
 };
 
 /* ------------------------------------------------------------------ *
@@ -1171,11 +1325,156 @@ const applyGlide = (dt, contacts) => {
   }
 };
 
-const crash = () => {
-  if (run.state === 'crashed') return;
+/* ------------------------------------------------------------------ *
+ * Blood. Droplets are integrated by hand rather than given cannon bodies:
+ * there can be hundreds, they never need to collide with anything but the
+ * snow, and the snow is a height function, so the whole test is one
+ * lookup. When a droplet lands it is retired and a stain takes its place.
+ *
+ * Stains are one InstancedMesh laid on the surface, reused as a ring
+ * buffer, so the ground keeps a record of the run at a fixed cost. They
+ * survive a wipeout restart on purpose — the point is that the hill
+ * remembers your attempts — and are wiped only when the level is beaten.
+ * ------------------------------------------------------------------ */
+let blood = null;
+
+const buildBlood = () => {
+  const maxDrops = 600;
+  const dropGeo = new THREE.SphereGeometry(0.055, 5, 4);
+  const dropMat = new THREE.MeshBasicMaterial({ color: 0xb2141b });
+  const drops = new THREE.InstancedMesh(dropGeo, dropMat, maxDrops);
+  drops.frustumCulled = false;
+  drops.count = 0;
+  scene.add(drops);
+
+  /* Domes, not decals. A flat disc on the snow is the obvious way to
+   * stain ground, and it is invisible here: the camera sits low and
+   * almost side-on to the hill, so a ground-plane disc is seen edge-on
+   * and draws as a one-pixel line. A squashed hemisphere reads as a mark
+   * on the snow from the side, which is the only angle this game has. */
+  const stainGeo = new THREE.SphereGeometry(1, 9, 6);
+  const stainMat = new THREE.MeshLambertMaterial({ color: 0x8e0f16 });
+  const stains = new THREE.InstancedMesh(stainGeo, stainMat, 2000);
+  stains.frustumCulled = false;
+  stains.count = 0;
+  scene.add(stains);
+
+  blood = {
+    drops: drops, stains: stains, maxDrops: maxDrops,
+    live: [], stainAt: 0, dummy: new THREE.Object3D(),
+  };
+};
+
+const addStain = (x, y, z, scale) => {
+  const cap = Math.min(Math.round(CONFIG.blood.maxStains), blood.stains.instanceMatrix.count);
+  const i = blood.stainAt % cap;
+  blood.stainAt++;
+  const d = blood.dummy;
+  /* Lie the disc along the hill, or it stands proud of a slope and reads
+   * as a floating coin rather than a mark on the snow. */
+  d.position.set(x, y + 0.01, z);
+  d.rotation.set(slopeAt(z), Math.random() * Math.PI * 2, 0);
+  /* Wide and thin, and stretched a little along the fall line so it reads
+   * as something that was moving when it landed. */
+  d.scale.set(scale, scale * 0.16, scale * (1.1 + Math.random() * 0.8));
+  d.updateMatrix();
+  blood.stains.setMatrixAt(i, d.matrix);
+  blood.stains.count = Math.min(cap, Math.max(blood.stains.count, i + 1));
+  blood.stains.instanceMatrix.needsUpdate = true;
+};
+
+const clearStains = () => {
+  if (!blood) return;
+  blood.stainAt = 0;
+  blood.stains.count = 0;
+  blood.live.length = 0;
+  blood.drops.count = 0;
+};
+
+const spawnBlood = (severity) => {
+  if (!blood) return;
+  const count = Math.round(CONFIG.blood.particles * severity);
+  const from = skier.bodies.head.position;
+  const v = skier.bodies.pelvis.velocity;
+  for (let i = 0; i < count && blood.live.length < blood.maxDrops; i++) {
+    const spray = CONFIG.blood.spray * (0.35 + Math.random() * 0.65) * severity;
+    const a = Math.random() * Math.PI * 2;
+    const up = Math.random();
+    blood.live.push({
+      x: from.x + (Math.random() - 0.5) * 0.3,
+      y: from.y + (Math.random() - 0.5) * 0.3,
+      z: from.z + (Math.random() - 0.5) * 0.3,
+      /* Carry some of the rider's own momentum, so the spray trails the
+       * direction of the crash instead of puffing out symmetrically. */
+      vx: Math.cos(a) * spray * 0.4,
+      vy: up * spray + v.y * 0.25,
+      vz: Math.sin(a) * spray * 0.5 + v.z * 0.45,
+      size: 0.5 + Math.random() * 0.9,
+    });
+  }
+};
+
+const updateBlood = (dt) => {
+  if (!blood || blood.live.length === 0) { if (blood) blood.drops.count = 0; return; }
+  const g = CONFIG.blood.gravity;
+  const d = blood.dummy;
+  let write = 0;
+  for (let i = 0; i < blood.live.length; i++) {
+    const p = blood.live[i];
+    p.vy -= g * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.z += p.vz * dt;
+    const ground = heightAt(p.z);
+    if (p.y <= ground + 0.02) {
+      addStain(p.x, ground, p.z, CONFIG.blood.stainSize * p.size);
+      continue;
+    }
+    d.position.set(p.x, p.y, p.z);
+    d.rotation.set(0, 0, 0);
+    d.scale.setScalar(p.size);
+    d.updateMatrix();
+    blood.drops.setMatrixAt(write, d.matrix);
+    blood.live[write] = p;
+    write++;
+  }
+  blood.live.length = write;
+  blood.drops.count = write;
+  blood.drops.instanceMatrix.needsUpdate = true;
+};
+
+/* Severity is what the wipeout cost you: how fast you were going into it,
+ * measured against the speed that counts as the worst case. The judges and
+ * the blood both read it, so a slow tip-over is a shrug and a full-speed
+ * case-and-tumble is not. */
+const crash = (landingDeg) => {
+  if (run.state === 'crashed' || run.state === 'finished') return;
+  const v = skier.bodies.pelvis.velocity;
+  const speed = Math.sqrt(v.y * v.y + v.z * v.z);
+  const fromSpeed = clamp(speed / CONFIG.blood.hardImpact, 0, 1);
+  const fromAngle = landingDeg ? clamp(landingDeg / 180, 0, 1) : 0;
   run.state = 'crashed';
   run.crashTimer = 0;
-  showToast('WIPEOUT');
+  run.crashes++;
+  const severity = clamp(fromSpeed * 0.75 + fromAngle * 0.5, 0.12, 1);
+  spawnBlood(severity);
+  showToast(severity > 0.66 ? 'WIPEOUT' : 'DOWN');
+};
+
+/* Everything the judges look at, cleared for a fresh attempt. Stains are
+ * deliberately not in here: they outlive a restart. */
+const resetScoring = () => {
+  run.bestAir = 0;
+  run.flips = 0;
+  run.flightTurn = 0;
+  run.flightPitch = 0;
+  run.landings = 0;
+  run.cleanLandings = 0;
+  run.worstLanding = 0;
+  run.crashes = 0;
+  run.finishTimer = 0;
+  run.scored = null;
+  el('score').classList.remove('show');
 };
 
 const resetRun = (rebuildWorld) => {
@@ -1183,12 +1482,14 @@ const resetRun = (rebuildWorld) => {
     world.removeBody(terrain.body);
     scene.remove(terrain.mesh);
     terrain.mesh.geometry.dispose();
+    if (terrain.gate) scene.remove(terrain.gate);
     buildTerrain();
   }
   run.posture = CONFIG.pump.neutral;
   run.prevPosture = CONFIG.pump.neutral;
   run.lean = 0;
   buildSkier();
+  resetScoring();
   run.state = 'ready';
   run.distance = 0;
   run.momentum = 0;
@@ -1209,16 +1510,41 @@ const stepGame = (dt) => {
   const contacts = (groundedL ? 1 : 0) + (groundedR ? 1 : 0);
   const grounded = contacts > 0;
 
+  /* Rotation is accumulated as a signed sum of per-step pitch deltas, so
+   * a flip that goes round and comes back counts as what it was worth at
+   * its furthest, not zero. */
+  const pitchNow = pitchOf(pelvis);
+  let turned = pitchNow - run.flightPitch;
+  while (turned > Math.PI) turned -= Math.PI * 2;
+  while (turned < -Math.PI) turned += Math.PI * 2;
+  run.flightPitch = pitchNow;
+
   if (grounded) {
     run.groundedFor += dt;
-    if (run.airborneFor > 0.25) run.lastAirTime = run.airborneFor;
+    if (run.airborneFor > 0.25) {
+      run.lastAirTime = run.airborneFor;
+      if (run.airborneFor > run.bestAir) run.bestAir = run.airborneFor;
+      run.flips += Math.abs(run.flightTurn) / (Math.PI * 2);
+      /* Landing quality is the angle between the rider and the hill they
+       * just met — the spec's clean / stumble / wipeout test. */
+      let off = pitchNow + slopeAt(pelvis.position.z);
+      while (off > Math.PI) off -= Math.PI * 2;
+      while (off < -Math.PI) off += Math.PI * 2;
+      const deg = Math.abs(off) * 180 / Math.PI;
+      run.landings++;
+      if (deg <= CONFIG.judges.cleanAngle) run.cleanLandings++;
+      if (deg > run.worstLanding) run.worstLanding = deg;
+      if (deg > CONFIG.judges.stumbleAngle && run.state !== 'crashed') crash(deg);
+    }
     run.airborneFor = 0;
-    if (run.state !== 'crashed') run.state = 'riding';
+    run.flightTurn = 0;
+    if (run.state !== 'crashed' && run.state !== 'finished') run.state = 'riding';
   } else {
     run.airborneFor += dt;
     run.groundedFor = 0;
+    run.flightTurn += turned;
     if (run.airborneFor > 0.08) {
-      if (run.state !== 'crashed') {
+      if (run.state !== 'crashed' && run.state !== 'finished') {
         run.state = 'air';
         run.airTime += dt;
       }
@@ -1263,18 +1589,20 @@ const stepGame = (dt) => {
   }
 
   run.distance = Math.max(run.distance, skier.startZ - pelvis.position.z);
+  if (run.state !== 'crashed' && run.state !== 'finished' &&
+      run.distance >= CONFIG.level.finishAt) finishRun();
   const speed = Math.sqrt(pelvis.velocity.y * pelvis.velocity.y + pelvis.velocity.z * pelvis.velocity.z);
   if (speed > run.momentum) run.momentum = speed;
 
   /* head or torso in the snow ends the run */
-  if (run.state !== 'crashed') {
+  if (run.state !== 'crashed' && run.state !== 'finished') {
     const head = skier.bodies.head.position;
     const torso = skier.bodies.torso.position;
     if (head.y - heightAt(head.z) < CONFIG.rules.crashHeight ||
         torso.y - heightAt(torso.z) < CONFIG.rules.crashHeight) crash();
   }
 
-  if (run.state !== 'crashed' && speed < CONFIG.rules.stallSpeed) {
+  if (run.state !== 'crashed' && run.state !== 'finished' && speed < CONFIG.rules.stallSpeed) {
     run.crashTimer += dt;
     if (run.crashTimer > CONFIG.rules.stallDelay) crash();
   } else if (run.state !== 'crashed') {
@@ -1286,8 +1614,12 @@ const stepGame = (dt) => {
     if (run.crashTimer > CONFIG.rules.crashHold) resetRun(false);
   }
 
-  if (pelvis.position.y < heightAt(pelvis.position.z) - 6 ||
-      -pelvis.position.z > CONFIG.terrain.length - 6) resetRun(false);
+  /* The run-out bail-outs, but never while the scoreboard is up: the
+   * rider keeps sliding after the gate, and resetting under them would
+   * pull the judges' scores off the screen before they were read. */
+  if (run.state !== 'finished' &&
+      (pelvis.position.y < heightAt(pelvis.position.z) - 6 ||
+       -pelvis.position.z > CONFIG.terrain.length - 6)) resetRun(false);
 };
 
 /* ------------------------------------------------------------------ *
@@ -1367,6 +1699,85 @@ const updateCamera = (dt) => {
   }
   camera.position.copy(camState.pos);
   camera.lookAt(camState.look);
+};
+
+/* Three judges, one run. They see the same three things — the biggest
+ * flight, how much rotation you got round, and whether you rode away from
+ * it — and weight them differently, which is the whole reason for having
+ * three rather than one number. Their disagreement is deterministic: a
+ * fixed lean per judge, not a dice roll, so the same run always scores the
+ * same and the panel can be tuned rather than merely watched. */
+const JUDGES = [
+  { name: 'AIR', bias: { air: 1.5, flips: 0.8, land: 0.7 } },
+  { name: 'STYLE', bias: { air: 0.8, flips: 1.5, land: 0.7 } },
+  { name: 'FORM', bias: { air: 0.7, flips: 0.7, land: 1.6 } },
+];
+
+const scoreRun = () => {
+  const air = clamp(run.bestAir / Math.max(0.1, CONFIG.judges.airFor10), 0, 1);
+  const flips = clamp(run.flips / Math.max(0.05, CONFIG.judges.flipsFor10), 0, 1);
+
+  /* Landing: full marks for riding away clean, scaled down by the worst
+   * angle you got away with, and a flat penalty for every wipeout. */
+  let land = 1;
+  if (run.landings > 0) {
+    const worst = clamp((run.worstLanding - CONFIG.judges.cleanAngle) /
+      Math.max(1, CONFIG.judges.stumbleAngle - CONFIG.judges.cleanAngle), 0, 1);
+    land = 1 - worst * 0.7;
+  }
+  land = clamp(land - run.crashes * (CONFIG.judges.crashPenalty / 10), 0, 1);
+
+  const cards = [];
+  let total = 0;
+  for (let i = 0; i < JUDGES.length; i++) {
+    const b = JUDGES[i].bias;
+    const weight = b.air + b.flips + b.land;
+    const raw = (air * b.air + flips * b.flips + land * b.land) / weight;
+    /* Spread the panel around the consensus so they read as three
+     * opinions, then clamp — a judge who loved it still cannot give 11. */
+    const lean = (i - 1) * CONFIG.judges.spread * (raw - 0.5) * 0.5;
+    cards.push({
+      name: JUDGES[i].name,
+      score: clamp(raw * 10 + lean, 0, 10),
+    });
+    total += cards[cards.length - 1].score;
+  }
+  return { cards: cards, total: total, air: air, flips: flips, land: land };
+};
+
+const showScoreboard = (result) => {
+  const board = el('score');
+  const rows = el('score-cards');
+  rows.textContent = '';
+  for (let i = 0; i < result.cards.length; i++) {
+    const card = document.createElement('div');
+    card.className = 'judge';
+    const name = document.createElement('div');
+    name.className = 'who';
+    name.textContent = result.cards[i].name;
+    const num = document.createElement('div');
+    num.className = 'num';
+    num.textContent = result.cards[i].score.toFixed(1);
+    card.appendChild(num);
+    card.appendChild(name);
+    rows.appendChild(card);
+  }
+  el('score-total').textContent = result.total.toFixed(1) + ' / 30';
+  el('score-detail').textContent =
+    'best air ' + run.bestAir.toFixed(2) + 's  ·  ' + run.flips.toFixed(2) + ' rotations  ·  ' +
+    (run.crashes > 0 ? run.crashes + ' wipeout' + (run.crashes > 1 ? 's' : '')
+      : 'landed at ' + Math.round(run.worstLanding) + '\u00b0');
+  board.classList.add('show');
+};
+
+const finishRun = () => {
+  run.state = 'finished';
+  run.finishTimer = 0;
+  run.scored = scoreRun();
+  /* Beating the level wipes the slate — the blood is the record of what
+   * this attempt cost, and the attempt is over. */
+  clearStains();
+  showScoreboard(run.scored);
 };
 
 let hudTimer = 0;
@@ -1453,6 +1864,7 @@ const wireInput = () => {
   stage.addEventListener('pointercancel', endPump);
 
   el('btn-reset').addEventListener('click', () => { resetRun(false); showToast('RESET'); });
+  el('score-again').addEventListener('click', () => resetRun(false));
 
   /* Keyboard is a desktop convenience, so it drives the same axis by
    * ramping the target rather than snapping it. */
@@ -1794,6 +2206,7 @@ const frame = (now) => {
   if (clock.accumulator > step * maxSteps) clock.accumulator = 0;
 
   syncMeshes();
+  updateBlood(dt);
   updateSun();
   updateCamera(dt);
   updateHud(dt);
@@ -1866,6 +2279,7 @@ const boot = () => {
   world.addContactMaterial(bodyContact);
   world.addContactMaterial(skiSnowContact);
 
+  buildBlood();
   buildTerrain();
   run.posture = CONFIG.pump.neutral;
   run.prevPosture = CONFIG.pump.neutral;
